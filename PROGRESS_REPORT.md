@@ -1,6 +1,6 @@
 # 📊 REPORTE DE PROGRESO - PROYECTO JARVIS
 
-**Generado:** 2026-08-07 · **Semana:** 4 (Intent Recognizer Híbrido) · **Estado:** ✅ SEMANA 4 COMPLETADA
+**Generado:** 2026-08-08 · **Semana:** 5 (Agentes Esenciales) · **Estado:** ✅ SEMANA 5 COMPLETADA
 
 ## 🎯 Estado General
 
@@ -10,8 +10,9 @@
 | **SEMANA 2** (Cerebro Central) | ✅ COMPLETADO | 100% |
 | **SEMANA 3** (Integración) | ✅ COMPLETADO | 100% |
 | **SEMANA 4** (Intent Recognizer Híbrido) | ✅ COMPLETADO | 100% |
-| **SEMANA 4-5** (Agentes Esenciales) | 📅 PENDIENTE | 0% |
-| **Proyecto General** | ⏳ EN PROGRESO | 35% |
+| **SEMANA 5** (Agentes Esenciales) | ✅ COMPLETADO | 100% |
+| **SEMANA 6** (Refinamiento) | 📅 PENDIENTE | 0% |
+| **Proyecto General** | ⏳ EN PROGRESO | 47% |
 
 ## 📈 Gráfico de Progreso
 
@@ -20,10 +21,68 @@ Semana 1 (Core):      ███████████████████�
 Semana 2 (Cerebro):   ████████████████████ 100% ✅
 Semana 3 (Integración): ████████████████████ 100% ✅
 Semana 4 (Intent):    ████████████████████ 100% ✅
-Semana 5 (Agentes):   ░░░░░░░░░░░░░░░░░░░░   0% 📅
+Semana 5 (Agentes):   ████████████████████ 100% ✅
 Semana 6 (Refinamiento):░░░░░░░░░░░░░░░░░░░░   0% 📅
 ──────────────────────────────────────────────────
-Total Proyecto:        ███████░░░░░░░░░░░░░  35% ⏳
+Total Proyecto:        █████████░░░░░░░░░░░  47% ⏳
+```
+
+## ✅ LO QUE SE COMPLETÓ EN SEMANA 5 (Agentes Esenciales)
+
+### Fase 0 — Framework de Agentes (`agents/base.py`, `registry.py`, `factory.py`)
+```
+✅ AgentBase: ciclo de vida (initialize/cleanup/stop), get_info(), logging
+   automático, errores estándar (record_error/_safe_call)
+✅ AgentRegistry: registro por tipo, list/list_all, start_all/stop_all, clear
+✅ AgentFactory: creación con degradación elegante (None si no hay librería)
+✅ 3 agentes reales registrados e inicializados en el orquestador
+```
+
+### Fase 1 — System Agent (`agents/system.py`) — WINDOWS real
+```
+✅ system_control: apagar / reiniciar / bloquear / dormir (os.system)
+✅ open_application: 13 apps web + 9 locales (webbrowser / os.startfile)
+✅ open_folder: abrir carpeta en el Explorador (con ~ expanduser)
+✅ take_screenshot: captura pyautogui → PNG en ~/Pictures
+✅ volume_control: subir/bajar/mutar vía pycaw (degradación sin pycaw)
+✅ empty_trash: Clear-RecycleBin vía PowerShell
+✅ lock_session: LockWorkStation
+✅ Smart fallback: procesos (tasklist/taskkill) y acciones "en desarrollo"
+```
+
+### Fase 2 — Web Agent (`agents/web.py`) — APIs reales sin key
+```
+✅ weather_query: Open-Meteo (geocoding + pronóstico) en español
+✅ crypto_price: CoinGecko (USD + variación 24h) para 23 monedas
+✅ search_info: Wikipedia(1a) → DuckDuckGo(2a) → Google(fallback)
+✅ news_query: Google News RSS vía feedparser
+✅ get_exchange_rate / check_investments: fallback elegante a Google
+```
+
+### Fase 3 — Dialog Agent (`agents/dialog.py`) — Gemini opcional + plantillas
+```
+✅ tell_joke: Gemini → pyjokes(es) → plantilla fija (degradación en 3 niveles)
+✅ change_name: persistido en data/assistant_name.txt
+✅ help_query: manual generado desde INTENT_CATALOG (52 comandos)
+✅ smalltalk: 7 reglas ES + palabras clave con {name}
+✅ translate_text: MyMemory API gratuita (es↔en)
+✅ MODO GEMINI: contexto de sesión (últimas 5 interacciones), seguro y mockeable
+```
+
+### Fase 4 — Integración en el Orquestador (`orchestrator/orchestrator.py`)
+```
+✅ _execute_intent delega en AgentRegistry + _AGENT_ROUTING (12 intenciones)
+✅ Fallback: si el agente no maneja la intención → 23 acciones directas
+✅ Degradación elegante: agente falla → fallback directo → "en desarrollo"
+✅ 3 agentes creados e inicializados al arrancar (start_all)
+```
+
+### Fase 5 — Tests y Cierre (verificación)
+```
+✅ 227 tests totales: 157 anteriores + 70 nuevos (framework, cobertura, smoke)
+✅ Cobertura jarvis/agents: TOTAL 97% (system 99%, dialog 98%, web 92%)
+✅ Smoke test E2E: process_input() real → clima/bitcoin/google/apagar/chiste/ayuda
+✅ Contenido: 33 intenciones reales (18 agentes + 23 directas − 8 compartidas)
 ```
 
 ## ✅ LO QUE SE COMPLETÓ EN SEMANA 4 (Intent Recognizer Híbrido)
@@ -193,11 +252,15 @@ jarvis/
 │   ├── test_decision.py       ✅ 400+ líneas (NUEVO)
 │   └── DECISION_README.md     ✅ 500+ líneas (NUEVO)
 ├── agents/
-│   ├── base.py                ⏳
-│   ├── voice_agent.py         ⏳
-│   ├── dialog_agent.py        ⏳
-│   └── [otros agentes]        ⏳
-└── orchestrator/              ⏳
+│   ├── __init__.py
+│   ├── base.py                ✅ SEMANA 5 (FASE 0)
+│   ├── registry.py            ✅ SEMANA 5 (FASE 0)
+│   ├── factory.py             ✅ SEMANA 5 (FASE 0)
+│   ├── system.py              ✅ SEMANA 5 (FASE 1) - 391 líneas
+│   ├── web.py                 ✅ SEMANA 5 (FASE 2) - 477 líneas
+│   ├── dialog.py              ✅ SEMANA 5 (FASE 3) - 466 líneas
+│   └── voice_agent.py         ⏳
+└── orchestrator/              ✅ Integrado con agentes (SEMANA 5, FASE 4)
 ```
 
 ## 🔍 Detalles Técnicos
@@ -275,25 +338,18 @@ jarvis/
 - Toma decisiones mejores con información previa
 - Base para futuro machine learning
 
-## 🚀 Próximos Pasos (SEMANA 5: Agentes Esenciales)
+## 🚀 Próximos Pasos (SEMANA 6: Refinamiento y Nuevos Agentes)
 
 ```
-SEMANA 5: Agentes Esenciales
-├── orchestrator.py  - Orquestador central que coordina todo
-│   ├── Inicializa agentes
-│   ├── Recibe entrada del usuario
-│   ├── Coordina intent + decision
-│   └── Ejecuta decisión con agente correcto
-│
-├── events.py       - Sistema de eventos
-│   ├── Publicadores y suscriptores
-│   ├── Event loop
-│   └── Async/await
-│
-└── errors.py       - Manejo de errores y recuperación
-    ├── Reintentos inteligentes
-    ├── Fallback a estrategias alternativas
-    └── Logging de errores
+SEMANA 6: Refinamiento
+├── Cerrar 24 intenciones pendientes del catálogo (ahora "en desarrollo")
+│   ├── Hogar: lights_on/off, adjust_temperature, lock/unlock_door, curtains, security
+│   ├── Finanzas: check_balance, transfer_money, pay_bills, budget_report
+│   ├── Salud: fitness_tracking, sleep_tracking, water_reminder, meditation, health_stats
+│   └── Productividad: calendar_event, send_email, call_contact, reminder_set, record_video
+├── FILE Agent (movido de S5) y CREATIVE Agent
+├── Control de voz continuo + wake word
+└── Consolidar eventos (events.py) y errores (errors.py)
 ```
 
 ## 📋 Checklist de Calidad
@@ -325,73 +381,81 @@ Documentación:
 
 ## 🎯 Métricas
 
-| Métrica | Valor |
-|---------|-------|
-| Archivos nuevos | 3 |
-| Líneas de código | 2,100+ |
-| Funciones | 25+ |
-| Clases | 12 |
-| Reglas de decisión | 5 |
-| Estrategias | 2 |
-| Escenarios de prueba | 8 |
-| Documentación (líneas) | 500+ |
-| Tiempo de ejecución decision | < 50ms |
-| Cobertura de casos | 95%+ |
+| Métrica | Semana 4 | Semana 5 |
+|---------|----------|----------|
+| Archivos nuevos | 3 | 6 (base, registry, factory, system, web, dialog) |
+| Líneas de código agentes | 0 | 1,330+ |
+| Tests totales | 76 | 227 |
+| Cobertura jarvis/agents | 0% | 97% (system 99%, dialog 98%, web 92%) |
+| Intenciones reales | 23 acciones | 33 (18 agentes + 23 directas − 8 compartidas) |
+| Intenciones pendientes | - | 24 (catálogo S6+) |
+| Agents vivos en runtime | 0 | 3 |
 
 ## 💾 Commit History
 
 ```
-1. ✅ 9a04a6839 - 🧠 Crear decision.py - Motor de decisiones central
-2. ✅ 1245c851a - 📦 Actualizar brain/__init__.py - Exportar módulos
-3. ✅ 220f86dd8 - 🧪 Crear test_decision.py - Suite de pruebas
-4. ✅ f777ae92a - 📖 Crear DECISION_README.md - Documentación
+SEMANA 5 (Agentes Esenciales):
+1. ✅ fe98e1d - 🤖 Fase 0: Framework de agentes (base, registry, factory)
+2. ✅ cea421e - 🖥️ Fase 1: System Agent
+3. ✅ a57bee4 - 🌐 Fase 2: Web Agent (Open-Meteo + CoinGecko + Wikipedia)
+4. ✅ 5d1980a - 💬 Fase 3: Dialog Agent (Gemini opcional + plantillas + MyMemory)
+5. ✅ d1929a5 - 🔗 Fase 4: Orquestador delega en agentes
+6. ✅ [FINAL] - Fase 5: Tests de cobertura + docs + verificación E2E
+
+SEMANA 4 (Intent Recognizer Híbrido):
+1. ✅ 5d7548c - 📦 Fase 0-1 datos e intenciones (intent_data)
+2. ✅ 908829b - ⚡ Fase 2-3 patrones y entidades
+3. ✅ 4707dc8 - 🤖 Fase 4 modelo ML
+4. ✅ c51f2d5 - 🔀 Fase 5 procesador híbrido
+5. ✅ 18b47d7 - 🔌 Fase 6 integración orquestador + acciones
+6. ✅ 193bbe4 - ✅ Fase 7 tests + docs
 ```
 
 ## 🌟 Highlights
 
 ### Lo Mejor de Esta Semana
-1. **Sistema extensible**: Nuevas reglas = una línea de código
-2. **Totalmente trazable**: Cada decisión logged y razonable
-3. **Production-ready**: Manejo de errores, validaciones, tests
-4. **Flexible**: 2 estrategias, fácil agregar más
-5. **Well-documented**: Código y documentación exhaustivos
+1. **3 agentes reales**: cada uno responde con datos/acciones reales (Open-Meteo,
+   CoinGecko, PowerShell, pycaw opcional) y degrada elegante sin crashear
+2. **Delegación real en el orquestador**: `_execute_intent` → AgentRegistry → agente
+   → respuesta; fallback a 23 acciones directas si no hay agente
+3. **Cobertura 97% en agentes**: system 99%, dialog 98%, web 92% con smoke test E2E
+4. **DialogAgent bilingüe seguro**: Gemini opcional con contexto de sesión y
+   degradación en 3 niveles sin exponer la API key
+5. **Framework reutilizable**: base/registry/factory listos para FILE, CREATIVE, etc.
 
 ### Sorpresas Positivas
-- El sistema de pesos ponderados resultó más poderoso que esperado
-- El DecisionContext permite futuro aprendizaje automático
-- El logging tan detallado hace debugging trivial
+- El smoke test E2E confirmó que el flujo `process_input()` completo responde real
+- pycaw no instalado → degradación perfecta a "en desarrollo" sin excepciones
+- El `_AGENT_ROUTING` + `selected_agent` del DecisionEngine se complementan bien
 
 ## 📞 Estado del Equipo
 
 ```
 ✅ Código: EXCELENTE CALIDAD
-✅ Tests: COMPLETO
+✅ Tests: 227 PASANDO + COBERTURA 97% EN AGENTES
 ✅ Documentación: EXHAUSTIVA
-✅ Listo para producción: SÍ
-✅ Listo para SEMANA 3: SÍ
+✅ Listo para producción: SÍ (modo texto; voz opcional)
+✅ Listo para SEMANA 6: SÍ
 ```
 
 ## 🎉 Conclusión
 
-**SEMANA 2 COMPLETADA EXITOSAMENTE** 🚀
+**SEMANA 5 COMPLETADA EXITOSAMENTE** 🚀
 
-Se construyó el **corazón estratégico de Jarvis** con:
-- Motor de decisiones robusto y flexible
-- Sistema de reglas extensible
-- Múltiples estrategias intercambiables
-- Suite completa de pruebas
-- Documentación exhaustiva
+Jarvis pasó de **reconocer** intenciones a **ejecutarlas con agentes reales**:
 
-**Jarvis ahora es capaz de PENSAR y DECIDIR**
+- 🖥️ **System Agent** controla el equipo (apagar, apps, carpetas, captura, volumen)
+- 🌐 **Web Agent** consulta APIs reales sin keys (clima, cripto, noticias, búsqueda)
+- 💬 **Dialog Agent** conversa, cuenta chistes, cambia su nombre y traduce
+- 🔗 **Orquestador** delega en ellos y degrada elegante ante cualquier fallo
 
-El cerebro de 3 capas está completo:
-1. ✅ MEMORIA (Semana 1)
-2. ✅ INTENCIÓN (En progress)
-3. ✅ DECISIÓN (Semana 2) ← COMPLETADO
+**El flujo completo ya funciona:** memoria → intención (híbrido) → decisión → agente → acción → respuesta.
+
+La fase de pensamiento y decisión (S2) ahora tiene **manos** (agentes, S5).
 
 ---
 
-**Generado:** 2026-07-06  
+**Generado:** 2026-08-08  
 **Por:** Gonzalo Pariona (gonza-hash89)  
 **Proyecto:** JARVIS - Asistente Personal AGI  
-**Versión:** 2.0.0
+**Versión:** 3.0.0
