@@ -39,7 +39,14 @@ from core.logger import JarvisLogger, AgentLogger, init_logger
 from core.intent_recognizer import IntentRecognizer, Intent
 from brain.intent_processor import IntentProcessor, get_processor
 from brain.memory import MemoryManager
-from brain.decision import DecisionEngine, DecisionContext, Intent as DecisionIntent
+from brain.decision import (
+    AgentType,
+    DecisionEngine,
+    DecisionContext,
+    Intent as DecisionIntent,
+)
+from agents.registry import AgentRegistry
+from agents.factory import AgentFactory
 from orchestrator.events import (
     Event,
     make_event,
@@ -104,6 +111,29 @@ except ImportError:  # pragma: no cover
     _PYJOKES_AVAILABLE = False
 
 
+# ==================== AGENTES (SEMANA 5) ====================
+
+_AGENT_TYPES: tuple = (AgentType.SYSTEM, AgentType.WEB, AgentType.DIALOG)
+
+# Intenciones atendidas por los agentes de Semana 5 que el DecisionEngine
+# aún no mapea explícitamente. El orquestador refina el ruteo aquí para que
+# deleguen al agente correcto (fallback directo si no lo manejan).
+_AGENT_ROUTING: Dict[str, AgentType] = {
+    "weather_query": AgentType.WEB,
+    "news_query": AgentType.WEB,
+    "crypto_price": AgentType.WEB,
+    "get_exchange_rate": AgentType.WEB,
+    "check_investments": AgentType.WEB,
+    "volume_control": AgentType.SYSTEM,
+    "open_folder": AgentType.SYSTEM,
+    "empty_trash": AgentType.SYSTEM,
+    "lock_session": AgentType.SYSTEM,
+    "smalltalk": AgentType.DIALOG,
+    "help_query": AgentType.DIALOG,
+    "translate_text": AgentType.DIALOG,
+}
+
+
 # ==================== ESTADOS DE JARVIS ====================
 
 class JarvisState(Enum):
@@ -156,6 +186,8 @@ class Orchestrator:
         self.intent_recognizer: Optional[IntentRecognizer] = None
         self.decision_engine: Optional[DecisionEngine] = None
         self.decision_context: Optional[DecisionContext] = None
+        self.agent_registry: Optional[AgentRegistry] = None
+        self.agent_factory: Optional[AgentFactory] = None
 
         # WebSocket server para esfera visual
         self.ws_server: Optional[WebSocketServer] = None
@@ -234,6 +266,9 @@ class Orchestrator:
         )
         self.logger.info("DecisionEngine inicializado")
 
+        # 6. Agentes (Semana 5): registry + factory + event_bus
+        self._init_agents()
+
         self.modules_ready = True
 
     def _init_ws_server(self) -> None:
@@ -247,6 +282,20 @@ class Orchestrator:
         except Exception as e:
             self.logger.error(f"No se pudo crear WebSocketServer: {e}")
             self.ws_server = None
+
+    def _init_agents(self) -> None:
+        """Crea y registra los agentes de Semana 5, asignándoles el event_bus."""
+        self.agent_registry = AgentRegistry()
+        self.agent_factory = AgentFactory()
+        for agent_type in _AGENT_TYPES:
+            agent = self.agent_factory.create(agent_type)
+            if agent is not None:
+                agent.event_bus = self.event_bus
+                self.agent_registry.register(agent)
+        self.agent_registry.start_all()
+        self.logger.info(
+            f"{self.agent_registry.get_count()} agentes registrados e inicializados"
+        )
 
     def _subscribe_events(self) -> None:
         """Escucha los eventos importantes para logging y observabilidad."""
@@ -555,7 +604,7 @@ class Orchestrator:
         # 4. Ejecutar la acción correspondiente
         response: Optional[str] = None
         if intent is not None:
-            response = self._execute_intent(intent, user_input)
+            response = self._execute_intent(intent, user_input, decision)
         else:
             response = "Lo siento, no entendí eso."
             self.speak(response)
@@ -666,9 +715,19 @@ class Orchestrator:
         self,
         intent: DecisionIntent,
         user_input: str,
+        decision: Optional[Any] = None,
     ) -> Optional[str]:
         """
-        Ejecuta la acción correspondiente a la intención reconocida.
+        Ejecuta la intención delegando en los agentes de Semana 5
+        cuando existe uno que la maneje; si no, usa las acciones directas.
+
+        Flujo:
+            1. Se obtiene el AgentType desde el DecisionEngine (o la decisión
+               ya tomada en process_input).
+            2. Se busca el agente en el AgentRegistry.
+            3. Si existe y maneja la intención → agent.process(message).
+            4. Si no existe o falla → fallback a las acciones directas.
+            5. Sin acción directa → mensaje "en desarrollo".
 
         Returns:
             La respuesta/resultado de la acción, o None si falló.
@@ -678,6 +737,39 @@ class Orchestrator:
             {"intent": intent.name, "input": user_input},
         )
 
+        # 1) Delegación a agentes (Semana 5)
+        agent_type = self._agent_type_for(intent, decision)
+        agent = self._find_agent_for(intent, agent_type)
+        if agent is not None:
+            try:
+                result = agent.process(self._agent_message(intent, user_input))
+                response = self._agent_response_text(result)
+                if response is not None:
+                    self.speak(response)
+                    self._publish(
+                        JarvisEvent.ACTION_COMPLETED,
+                        {
+                            "intent": intent.name,
+                            "agent": agent.agent_type,
+                            "result": result,
+                        },
+                    )
+                    return response
+            except Exception as e:
+                # Degradación elegante: si el agente falla → fallback directo
+                self.logger.warning(
+                    f"Agente {agent.agent_type} falló para '{intent.name}': {e}"
+                )
+                self._publish(
+                    JarvisEvent.ACTION_FAILED,
+                    {
+                        "intent": intent.name,
+                        "agent": agent.agent_type,
+                        "error": str(e),
+                    },
+                )
+
+        # 2) Fallback: acciones directas para intenciones sin agente
         actions = {
             "time_query": self._action_time,
             "date_query": self._action_date,
@@ -727,13 +819,93 @@ class Orchestrator:
                 JarvisEvent.ACTION_FAILED,
                 {"intent": intent.name, "error": str(e)},
             )
-            self.error_handler.handle(
-                exception=e,
-                operation=f"action_{intent.name}",
-                severity=ErrorSeverity.ERROR,
-                strategy=RecoveryStrategy.SKIP,
-            )
+            error_handler = getattr(self, "error_handler", None)
+            if error_handler is not None:
+                error_handler.handle(
+                    exception=e,
+                    operation=f"action_{intent.name}",
+                    severity=ErrorSeverity.ERROR,
+                    strategy=RecoveryStrategy.SKIP,
+                )
             return None
+
+    # ==================== DELEGACIÓN A AGENTES ====================
+
+    def _agent_type_for(
+        self,
+        intent: DecisionIntent,
+        decision: Optional[Any] = None,
+    ) -> Optional[AgentType]:
+        """Devuelve el AgentType responsable desde el DecisionEngine."""
+        if decision is not None:
+            return decision.selected_agent
+        engine = getattr(self, "decision_engine", None)
+        if engine is None:
+            return None
+        try:
+            decision = engine.decide([intent])
+            if decision is None:
+                return None
+            return decision.selected_agent
+        except Exception as e:
+            self.logger.warning(f"No se pudo decidir agente para '{intent.name}': {e}")
+            return None
+
+    def _find_agent_for(
+        self,
+        intent: DecisionIntent,
+        agent_type: Optional[AgentType],
+    ) -> Optional[Any]:
+        """Busca en el registry un agente que maneje la intención."""
+        registry = getattr(self, "agent_registry", None)
+        if registry is None:
+            return None
+
+        candidate = None
+        routed = _AGENT_ROUTING.get(intent.name)
+        if routed is not None:
+            candidate = registry.get(routed.value)
+        elif agent_type is not None:
+            candidate = registry.get(agent_type.value)
+
+        if candidate is not None and self._agent_handles(candidate, intent.name):
+            return candidate
+        return None
+
+    @staticmethod
+    def _agent_handles(agent: Any, intent_name: str) -> bool:
+        """True si el agente registra un handler para la intención."""
+        handlers = getattr(agent, "_handlers", None)
+        return isinstance(handlers, dict) and intent_name in handlers
+
+    @staticmethod
+    def _agent_message(
+        intent: DecisionIntent,
+        user_input: str,
+    ) -> Dict[str, Any]:
+        """Construye el mensaje estándar que recibe agent.process()."""
+        return {
+            "intent": intent.name,
+            "entities": intent.parameters,
+            "raw_input": user_input,
+            "confidence": intent.confidence,
+            # Aliases para compatibilidad con los agentes de Semana 5
+            "parameters": intent.parameters,
+            "text": user_input,
+            "user_input": user_input,
+        }
+
+    @staticmethod
+    def _agent_response_text(result: Any) -> Optional[str]:
+        """Extrae el texto de la respuesta de un agente (o None si falló)."""
+        if not isinstance(result, dict):
+            return str(result) or None
+        if result.get("status") != "success":
+            return None
+        data = result.get("data")
+        if isinstance(data, dict):
+            return (data.get("result") or data.get("error") or "") or None
+        return str(data or "") or None
 
     # ==================== ACCIONES (11) ====================
 
@@ -1184,6 +1356,7 @@ class Orchestrator:
             "intent_recognizer",
             "intent_processor",
             "decision_engine",
+            "agents",
         ]
         if self.ws_server:
             modules.append("websocket_server")
@@ -1200,6 +1373,17 @@ class Orchestrator:
             except Exception:
                 memory_stats = None
 
+        registry = getattr(self, "agent_registry", None)
+        agents_status = []
+        if registry is not None:
+            for agent in registry.list_all():
+                agents_status.append({
+                    "type": agent.agent_type,
+                    "active": agent.is_active,
+                    "initialized": bool(getattr(agent, "initialized", False)),
+                    "capabilities": sorted(getattr(agent, "_handlers", {}).keys()),
+                })
+
         return {
             "name": self.config.system.name,
             "version": self.config.system.version,
@@ -1210,6 +1394,7 @@ class Orchestrator:
             "voice_available": self._voice_available,
             "speech_recognition_available": self._sr_available,
             "assistant_name": self._load_name(),
+            "agents": agents_status,
             "modules": {
                 "event_bus": self.event_bus.get_stats() if self.event_bus else None,
                 "error_handler": self.error_handler.get_stats() if self.error_handler else None,
@@ -1231,6 +1416,7 @@ class Orchestrator:
                     "clients": len(self.ws_server.clients) if self.ws_server else 0,
                     "port": 8765
                 } if self.ws_server else None,
+                "agents": registry.get_count() if registry else 0,
             },
         }
 
