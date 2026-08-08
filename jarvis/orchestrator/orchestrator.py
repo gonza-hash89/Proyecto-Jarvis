@@ -67,6 +67,14 @@ except ImportError:  # pragma: no cover
     pyttsx3 = None
     _VOICE_AVAILABLE = False
 
+# WebSocket server para esfera visual (opcional)
+try:
+    from jarvis.servidor_ws import WebSocketServer
+    _WS_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    WebSocketServer = None
+    _WS_AVAILABLE = False
+
 try:
     import speech_recognition as sr
     _SR_AVAILABLE = True
@@ -149,9 +157,15 @@ class Orchestrator:
         self.decision_engine: Optional[DecisionEngine] = None
         self.decision_context: Optional[DecisionContext] = None
 
+        # WebSocket server para esfera visual
+        self.ws_server: Optional[WebSocketServer] = None
+        self._ws_thread: Optional[threading.Thread] = None
+        self._ws_loop: Optional[asyncio.AbstractEventLoop] = None
+
         # Arranque completo
         self._init_voice_engine()
         self._init_modules()
+        self._init_ws_server()
         self._subscribe_events()
 
         self.logger.info("Orchestrator inicializado correctamente")
@@ -221,6 +235,18 @@ class Orchestrator:
         self.logger.info("DecisionEngine inicializado")
 
         self.modules_ready = True
+
+    def _init_ws_server(self) -> None:
+        """Inicializa el servidor WebSocket para la esfera visual (si está disponible)."""
+        if not _WS_AVAILABLE:
+            self.logger.warning("servidor_ws.py no disponible. Esfera visual sin conexión.")
+            return
+        try:
+            self.ws_server = WebSocketServer(host="localhost", port=8765)
+            self.logger.info("WebSocketServer creado (puerto 8765)")
+        except Exception as e:
+            self.logger.error(f"No se pudo crear WebSocketServer: {e}")
+            self.ws_server = None
 
     def _subscribe_events(self) -> None:
         """Escucha los eventos importantes para logging y observabilidad."""
@@ -308,6 +334,12 @@ class Orchestrator:
             {"session": self.decision_context.session_id},
         )
 
+        # Iniciar servidor WebSocket en hilo separado
+        if self.ws_server:
+            self._ws_thread = threading.Thread(target=self._run_ws_server, daemon=True, name="jarvis-ws")
+            self._ws_thread.start()
+            self.logger.info("WebSocket server iniciado en hilo background")
+
         self._wishme()
 
         while self.is_running:
@@ -328,6 +360,15 @@ class Orchestrator:
 
         self.shutdown()
 
+    def _run_ws_server(self) -> None:
+        """Ejecuta el loop asyncio del servidor WebSocket en un hilo dedicado."""
+        try:
+            self._ws_loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self._ws_loop)
+            self._ws_loop.run_until_complete(self.ws_server.start())
+        except Exception as e:
+            self.logger.error(f"Error en WebSocket server: {e}")
+
     def shutdown(self) -> None:
         """Apaga Jarvis de forma ordenada, cerrando sesión y bus."""
         self._publish(
@@ -338,6 +379,14 @@ class Orchestrator:
         self.stop()
         if self.event_bus:
             self.event_bus.stop()
+        # Detener servidor WebSocket
+        if self.ws_server and self._ws_loop:
+            try:
+                self._ws_loop.call_soon_threadsafe(self._ws_loop.stop)
+                if self._ws_thread:
+                    self._ws_thread.join(timeout=2)
+            except Exception as e:
+                self.logger.warning(f"Error deteniendo WS server: {e}")
         self.logger.info("Jarvis apagado correctamente")
 
     def stop(self) -> None:
@@ -358,6 +407,7 @@ class Orchestrator:
         if not text:
             return
         self.set_state(JarvisState.SPEAKING)
+        self._publish(JarvisEvent.SPEAKING_STARTED, {})
         self.logger.info(f"[Jarvis] {text}")
 
         if self._voice_available and self.engine is not None:
@@ -374,6 +424,7 @@ class Orchestrator:
         else:
             print(f"[{self._load_name()}] {text}")
 
+        self._publish(JarvisEvent.SPEAKING_ENDED, {})
         self.set_state(JarvisState.IDLE)
 
     def _listen(self) -> Optional[str]:
@@ -1126,7 +1177,7 @@ class Orchestrator:
 
     def _get_module_list(self) -> list:
         """Lista de módulos inicializados."""
-        return [
+        modules = [
             "event_bus",
             "error_handler",
             "memory",
@@ -1134,6 +1185,9 @@ class Orchestrator:
             "intent_processor",
             "decision_engine",
         ]
+        if self.ws_server:
+            modules.append("websocket_server")
+        return modules
 
     # ==================== ESTADO DEL SISTEMA ====================
 
@@ -1172,6 +1226,11 @@ class Orchestrator:
                     len(self.decision_engine.get_decision_history())
                     if self.decision_engine else 0
                 ),
+                "websocket_server": {
+                    "running": self.ws_server is not None,
+                    "clients": len(self.ws_server.clients) if self.ws_server else 0,
+                    "port": 8765
+                } if self.ws_server else None,
             },
         }
 
