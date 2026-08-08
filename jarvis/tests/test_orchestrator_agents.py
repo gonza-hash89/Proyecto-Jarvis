@@ -241,6 +241,7 @@ def test_get_status_incluye_agentes():
     inst.decision_engine = None
     inst.event_bus = None
     inst.error_handler = None
+    inst.ws_server = None
     inst._load_name = lambda: "Jarvis"
 
     web = _FakeAgent("web_agent", {"weather_query": True, "crypto_price": True})
