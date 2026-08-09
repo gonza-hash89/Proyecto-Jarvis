@@ -13,10 +13,11 @@ from pathlib import Path
 @dataclass
 class VoiceConfig:
     """Configuración del módulo de voz"""
-    engine: str = "pyttsx3"
+    engine: str = "edge"  # edge (neural, recomendado), pyttsx3 (offline)
+    voice: str = "es-ES-AlvaroNeural"  # Voz neural de edge-tts (masculina ES)
     rate: int = 150  # Velocidad de habla
     volume: float = 1.0  # Volumen (0-1)
-    voice_id: int = 1  # 0=Masculina, 1=Femenina
+    voice_id: int = 1  # 0=Masculina, 1=Femenina (solo fallback pyttsx3)
     language: str = "es-ES"
     timeout: int = 5  # Segundos para escuchar
 

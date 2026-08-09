@@ -74,6 +74,20 @@ except ImportError:  # pragma: no cover
     pyttsx3 = None
     _VOICE_AVAILABLE = False
 
+try:
+    import edge_tts
+    _EDGE_TTS_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    edge_tts = None
+    _EDGE_TTS_AVAILABLE = False
+
+try:
+    import pygame
+    _PYGAME_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    pygame = None
+    _PYGAME_AVAILABLE = False
+
 # WebSocket server para esfera visual (opcional)
 try:
     from jarvis.servidor_ws import WebSocketServer
@@ -178,6 +192,8 @@ class Orchestrator:
         self.engine = None
         self._voice_available = _VOICE_AVAILABLE
         self._sr_available = _SR_AVAILABLE
+        self._edge_available = _EDGE_TTS_AVAILABLE
+        self._pygame_available = _PYGAME_AVAILABLE
 
         # Subsistemas (se inicializan después)
         self.event_bus: Optional[EventBus] = None
@@ -205,30 +221,58 @@ class Orchestrator:
     # ==================== INICIALIZACIÓN ====================
 
     def _init_voice_engine(self) -> None:
-        """Inicializa el motor de voz (pyttsx3) con la configuración."""
-        if not _VOICE_AVAILABLE:
-            self.logger.warning("pyttsx3 no instalado. Jarvis correrá en modo texto.")
-            self._voice_available = False
-            self.engine = None
-            return
+        """Inicializa el motor de voz.
 
-        try:
-            self.engine = pyttsx3.init()
-            voices = self.engine.getProperty("voices")
+        Prioridad:
+            1. edge-tts (voces neurales, si está instalado).
+            2. pyttsx3 (offline, voces SAPI de Windows).
+            3. Modo texto (sin motor de voz).
+        """
+        engine_choice = getattr(self.config.voice, "engine", "edge")
 
-            # Seleccionar voz según configuración (0=masculina, 1=femenina)
-            voice_id = self.config.voice.voice_id
-            if voices and 0 <= voice_id < len(voices):
-                self.engine.setProperty("voice", voices[voice_id].id)
+        # 1. edge-tts (motor recomendado)
+        if engine_choice == "edge" and _EDGE_TTS_AVAILABLE:
+            try:
+                if _PYGAME_AVAILABLE:
+                    pygame.mixer.init()
+                    self.logger.info(
+                        f"Motor de voz edge-tts inicializado (voz={self.config.voice.voice})"
+                    )
+                    self._voice_available = True
+                    return
+                self.logger.warning(
+                    "pygame no instalado; edge-tts no puede reproducir el audio."
+                )
+            except Exception as e:
+                self.logger.error(f"No se pudo inicializar pygame para edge-tts: {e}")
 
-            self.engine.setProperty("rate", self.config.voice.rate)
-            self.engine.setProperty("volume", self.config.voice.volume)
-            self._voice_available = True
-            self.logger.info(f"Motor de voz inicializado (rate={self.config.voice.rate})")
-        except Exception as e:
-            self._voice_available = False
-            self.engine = None
-            self.logger.error(f"No se pudo inicializar el motor de voz: {e}")
+        # 2. pyttsx3 (offline)
+        if _VOICE_AVAILABLE:
+            try:
+                self.engine = pyttsx3.init()
+                voices = self.engine.getProperty("voices")
+
+                # Seleccionar voz según configuración (0=masculina, 1=femenina)
+                voice_id = self.config.voice.voice_id
+                if voices and 0 <= voice_id < len(voices):
+                    self.engine.setProperty("voice", voices[voice_id].id)
+
+                self.engine.setProperty("rate", self.config.voice.rate)
+                self.engine.setProperty("volume", self.config.voice.volume)
+                self._voice_available = True
+                self.logger.info(
+                    f"Motor de voz pyttsx3 inicializado (rate={self.config.voice.rate})"
+                )
+                return
+            except Exception as e:
+                self._voice_available = False
+                self.engine = None
+                self.logger.error(f"No se pudo inicializar el motor de voz: {e}")
+
+        # 3. Sin motor
+        self._voice_available = False
+        self.engine = None
+        self.logger.warning("Sin motor de voz disponible. Jarvis correrá en modo texto.")
 
     def _init_modules(self) -> None:
         """Inicializa el EventBus, ErrorHandler, Memoria, Intención y Decisión."""
@@ -452,17 +496,26 @@ class Orchestrator:
     # ==================== ENTRADA Y SALIDA ====================
 
     def speak(self, text: str) -> None:
-        """Hace que Jarvis hable con pyttsx3 (o imprime en modo texto)."""
+        """Hace que Jarvis hable (edge-tts neural, pyttsx3 o texto)."""
         if not text:
             return
         self.set_state(JarvisState.SPEAKING)
         self._publish(JarvisEvent.SPEAKING_STARTED, {})
         self.logger.info(f"[Jarvis] {text}")
 
-        if self._voice_available and self.engine is not None:
+        spoken = False
+        engine_choice = getattr(self.config.voice, "engine", "edge")
+
+        # 1. edge-tts (voz neural clara)
+        if engine_choice == "edge" and self._edge_available and _PYGAME_AVAILABLE:
+            spoken = self._speak_edge(text)
+
+        # 2. pyttsx3 (respaldo offline)
+        if not spoken and self._voice_available and self.engine is not None:
             try:
                 self.engine.say(text)
                 self.engine.runAndWait()
+                spoken = True
             except Exception as e:
                 self.error_handler.handle(
                     exception=e,
@@ -470,11 +523,42 @@ class Orchestrator:
                     severity=ErrorSeverity.ERROR,
                     strategy=RecoveryStrategy.SKIP,
                 )
-        else:
+
+        # 3. Modo texto
+        if not spoken:
             print(f"[{self._load_name()}] {text}")
 
         self._publish(JarvisEvent.SPEAKING_ENDED, {})
         self.set_state(JarvisState.IDLE)
+
+    def _speak_edge(self, text: str) -> bool:
+        """Habla con edge-tts (voz neural) y reproduce el audio con pygame."""
+        try:
+            import asyncio
+            import tempfile
+            import uuid
+
+            voice = getattr(self.config.voice, "voice", "es-ES-AlvaroNeural")
+            mp3_path = os.path.join(
+                tempfile.gettempdir(), f"jarvis_speech_{uuid.uuid4().hex[:8]}.mp3"
+            )
+
+            asyncio.run(edge_tts.Communicate(text, voice).save(mp3_path))
+
+            pygame.mixer.music.load(mp3_path)
+            pygame.mixer.music.set_volume(self.config.voice.volume)
+            pygame.mixer.music.play()
+            while pygame.mixer.music.get_busy():
+                time.sleep(0.1)
+            pygame.mixer.music.unload()
+            try:
+                os.remove(mp3_path)
+            except OSError:
+                pass
+            return True
+        except Exception as e:
+            self.logger.warning(f"edge-tts falló ({e}); usando respaldo")
+            return False
 
     def _listen(self) -> Optional[str]:
         """
