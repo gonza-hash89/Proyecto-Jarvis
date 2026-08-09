@@ -45,6 +45,10 @@ class JarvisEvent(str, Enum):
     # --- Estado ---
     STATE_CHANGED = "state_changed"            # El estado de Jarvis cambió
 
+    # --- Voz ---
+    SPEAKING_STARTED = "speaking_started"      # Jarvis empezó a hablar
+    SPEAKING_ENDED = "speaking_ended"          # Jarvis terminó de hablar
+
     # --- Usuario ---
     USER_INPUT_RECEIVED = "user_input_received"    # Input del usuario llegó
     USER_INPUT_PROCESSED = "user_input_processed"  # Input fue procesado
