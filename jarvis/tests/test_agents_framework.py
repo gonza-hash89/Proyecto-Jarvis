@@ -221,6 +221,12 @@ def test_create_no_soportado():
     assert AgentFactory().create(AgentType.MEMORY) is None
 
 
+def test_create_calendar_agent(tmp_path):
+    agent = AgentFactory().create(AgentType.CALENDAR, {"credentials_dir": str(tmp_path)})
+    assert agent is not None
+    assert agent.agent_type == "calendar_agent"
+
+
 def test_create_fusiona_config():
     agent = AgentFactory(config={"base": 1}).create(AgentType.SYSTEM, {"extra": 2})
     assert agent.config["base"] == 1
