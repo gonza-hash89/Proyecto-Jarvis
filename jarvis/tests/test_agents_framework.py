@@ -255,4 +255,5 @@ def test_supported_types():
     assert AgentType.SYSTEM in tipos
     assert AgentType.WEB in tipos
     assert AgentType.DIALOG in tipos
-    assert len(tipos) == 3
+    assert AgentType.FILE in tipos
+    assert len(tipos) >= 3

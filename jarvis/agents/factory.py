@@ -19,11 +19,12 @@ from agents.base import AgentBase
 class AgentFactory:
     """Crea instancias de agentes según AgentType."""
 
-    # AgentType -> (módulo, clase) de los agentes de Semana 5
+    # AgentType -> (módulo, clase) de los agentes de Semana 5 y 6
     _AGENT_MAP: Dict[AgentType, tuple] = {
         AgentType.SYSTEM: ("agents.system", "SystemAgent"),
         AgentType.WEB: ("agents.web", "WebAgent"),
         AgentType.DIALOG: ("agents.dialog", "DialogAgent"),
+        AgentType.FILE: ("agents.file", "FileAgent"),
     }
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
