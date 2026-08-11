@@ -17,6 +17,8 @@ REGLAS:
 - Todas las llamadas externas (genai, requests, pyjokes) son mockeables.
 """
 
+import asyncio
+import concurrent.futures
 import os
 import re
 from collections import deque
@@ -24,6 +26,7 @@ from typing import Any, Callable, Deque, Dict, List, Optional, Tuple
 
 from agents.base import AgentBase
 from brain.intent_data import CATEGORIES, INTENT_CATALOG
+from brain.intent_entities import EntityExtractor
 
 # Librerías opcionales (imports seguros)
 try:
@@ -48,6 +51,19 @@ except ImportError:  # pragma: no cover - entorno sin requests
     _REQUESTS_AVAILABLE = False
 
 _MODEL_NAMES = ("gemini-2.0-flash", "gemini-1.5-flash", "gemini-pro")
+
+
+def _run_coro(coro: Any) -> Any:
+    """Ejecuta una corrutina de memoria desde código síncrono.
+
+    Degradación elegante: si ya existe un loop corriendo, ejecuta la
+    corrutina en un hilo separado para no bloquear la arquitectura.
+    """
+    try:
+        return asyncio.run(coro)
+    except RuntimeError:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, coro).result()
 
 _NORM = {
     "á": "a", "à": "a", "â": "a", "ä": "a",
@@ -99,6 +115,7 @@ class DialogAgent(AgentBase):
         self._api_key: str = (
             (config or {}).get("gemini_api_key") or os.getenv("GEMINI_API_KEY", "")
         )
+        self._memory: Optional[Any] = (config or {}).get("memory")
         self._history: Deque[Tuple[str, str]] = deque(maxlen=10)
         self._model: Optional[Any] = None
         self._assistant_name: str = self._load_name()
@@ -143,6 +160,7 @@ class DialogAgent(AgentBase):
 
         try:
             data = handler(params, user_input)
+            self._remember_detected_facts(user_input)
             return self._result("success", data)
         except Exception as e:
             self.record_error(f"process:{intent}", e)
@@ -200,10 +218,27 @@ class DialogAgent(AgentBase):
                 return ""
 
         parts: List[str] = []
+
+        # Memoria episódica persistente (CONCIENCIA N1)
+        persistent = self._recent_conversations(5)
+        if persistent:
+            parts.append("Conversaciones anteriores (memoria persistente):")
+            for turn in persistent:
+                parts.append(f"Usuario: {turn['user_message']}")
+                parts.append(f"JARVIS: {turn['agent_response']}")
+
         if self._history:
             parts.append("Historial de la conversación (últimas interacciones):")
             for role, content in self._history:
                 parts.append(f"{role}: {content}")
+
+        # Memoria semántica / hechos del usuario (CONCIENCIA N2)
+        facts = self._get_facts()
+        if facts:
+            parts.append("Datos que conozco del usuario (memoria semántica):")
+            for fact in facts:
+                parts.append(f"- {fact['fact_type']}: {fact['fact_value']}")
+
         if user_input:
             parts.append(f"Usuario: {user_input}")
         parts.append(f"(Intención detectada: {intent})")
@@ -230,6 +265,194 @@ class DialogAgent(AgentBase):
         if user_text:
             self._history.append(("Usuario", user_text))
         self._history.append(("JARVIS", assistant_text))
+
+    def _remember_detected_facts(self, user_input: str) -> None:
+        """Extrae hechos declarativos de la frase y los persiste (N2)."""
+        if not user_input or self._memory is None:
+            return
+        try:
+            facts = EntityExtractor().extract_facts(user_input)
+        except Exception as e:
+            self.record_error("fact_extraction", e)
+            return
+        for fact in facts:
+            self._remember_fact(
+                fact["fact_type"],
+                fact["fact_value"],
+                confidence=fact["confidence"],
+                source=fact.get("source"),
+            )
+
+    # ==================== MEMORIA (CONCIENCIA N1/N2) ====================
+    # Declaración de honestidad: la "memoria" aquí es recuperación de datos
+    # reales desde SQLite, no vivencia subjetiva. Todo es observable y testeable.
+
+    def _recent_conversations(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """Últimas conversaciones persistentes, en orden antiguo → reciente."""
+        if self._memory is None:
+            return []
+        try:
+            turns = self._memory.get_recent_sync(limit) or []
+        except Exception as e:
+            self.record_error("memory_recent", e)
+            return []
+        return list(reversed(turns))
+
+    def _get_facts(self, fact_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        """Hechos persistentes sobre el usuario (o de un tipo concreto)."""
+        if self._memory is None:
+            return []
+        try:
+            return self._memory.get_facts_sync(fact_type) or []
+        except Exception as e:
+            self.record_error("memory_facts", e)
+            return []
+
+    def _remember_fact(
+        self,
+        fact_type: str,
+        fact_value: str,
+        confidence: float = 0.8,
+        source: Optional[str] = None,
+    ) -> None:
+        """Persiste un hecho sobre el usuario en la memoria semántica."""
+        if self._memory is None:
+            return
+        try:
+            _run_coro(self._memory.save_fact(fact_type, fact_value, confidence, source))
+        except Exception as e:
+            self.record_error("memory_save_fact", e)
+
+    def _summarize_recent(self) -> Dict[str, Any]:
+        """Responde '¿de qué hablamos?' con datos reales de SQLite."""
+        turns = self._recent_conversations(5)
+        if not turns:
+            return {
+                "result": "Todavía no hemos hablado de nada que yo recuerde.",
+                "source": "memory",
+            }
+        lines = []
+        for turn in turns:
+            when = str(turn.get("timestamp", "")).split(" ")[0]
+            lines.append(
+                f"- [{when}] Tú: {turn['user_message']} → Yo: {turn['agent_response']}"
+            )
+        return {
+            "result": "Esto es de lo que hemos hablado:\n" + "\n".join(lines),
+            "source": "memory",
+        }
+
+    def _search_memory(self, query: str) -> Dict[str, Any]:
+        """Busca conversaciones pasadas sobre un tema ('¿recuerdas cuando X?')."""
+        if self._memory is None:
+            return {
+                "result": "No tengo memoria disponible en este modo.",
+                "source": "templates",
+            }
+        try:
+            results = _run_coro(self._memory.search_conversations(query, limit=3)) or []
+        except Exception as e:
+            self.record_error("memory_search", e)
+            results = []
+        if not results:
+            return {
+                "result": f"No recuerdo haber hablado de '{query.strip()}'.",
+                "source": "memory",
+            }
+        lines = [
+            f"- Tú: {r['user_message']} → Yo: {r['agent_response']}" for r in results
+        ]
+        return {
+            "result": "Sí, recuerdo:\n" + "\n".join(lines),
+            "source": "memory",
+        }
+
+    def _answer_user_name(self) -> Dict[str, Any]:
+        """Responde '¿cómo me llamo?' desde la memoria semántica."""
+        facts = self._get_facts("nombre")
+        if facts:
+            name = facts[0]["fact_value"]
+            return {
+                "result": f"Claro, tu nombre es {name}.",
+                "source": "memory",
+            }
+        return {
+            "result": "Todavía no me has dicho tu nombre. ¿Cómo te llamas?",
+            "source": "templates",
+        }
+
+    def _answer_preferences(self, fact_type: str = "preferencia") -> Dict[str, Any]:
+        """Responde preguntas sobre gustos del usuario desde los hechos."""
+        facts = self._get_facts(fact_type)
+        if not facts:
+            return {
+                "result": "Aún no me has contado eso. ¡Cuéntame!",
+                "source": "templates",
+            }
+        values = ", ".join(f["fact_value"] for f in facts)
+        labels = {
+            "preferencia": "preferencias",
+            "lugar": "lugar",
+            "tarea": "pendientes",
+            "nombre": "nombre",
+        }
+        label = labels.get(fact_type, fact_type)
+        return {
+            "result": f"Recuerdo tus {label}: {values}.",
+            "source": "memory",
+        }
+
+    @staticmethod
+    def _is_user_name_question(norm: str) -> bool:
+        """True si la frase pregunta por el nombre del USUARIO."""
+        return any(
+            k in norm
+            for k in (
+                "como me llamo",
+                "cual es mi nombre",
+                "como es mi nombre",
+                "recuerdas mi nombre",
+                "whats my name",
+                "what is my name",
+                "do you know my name",
+            )
+        )
+
+    @staticmethod
+    def _is_preference_question(norm: str) -> bool:
+        """True si la frase pregunta por gustos del usuario."""
+        return any(
+            k in norm
+            for k in (
+                "que musica me gusta",
+                "que me gusta",
+                "cuales son mis preferencias",
+                "que comida me gusta",
+                "what music do i like",
+            )
+        )
+
+    @staticmethod
+    def _is_recall_question(norm: str) -> bool:
+        """True si la frase pide recordar conversaciones pasadas."""
+        if any(
+            k in norm
+            for k in (
+                "de que hablamos",
+                "que hablamos",
+                "que hemos hablado",
+                "de que me hablaste",
+                "de que estuvimos hablando",
+                "retomemos",
+            )
+        ):
+            return True
+        return bool(
+            re.search(
+                r"recuerdas cuando|te acuerdas cuando|do you remember|remember when",
+                norm,
+            )
+        )
 
     # ==================== CHISTES ====================
 
@@ -262,6 +485,7 @@ class DialogAgent(AgentBase):
         new_name = new_name.strip().strip(" ¿?¡!.,:;'\"¿").capitalize()
         self._assistant_name = new_name
         origin = self._save_name(new_name)
+        self._remember_fact("nombre", new_name, confidence=0.95)
         return {
             "result": f"Listo, a partir de ahora me llamo {new_name}.",
             "source": origin,
@@ -355,12 +579,24 @@ class DialogAgent(AgentBase):
     # ==================== SMALLTALK ====================
 
     def _smalltalk(self, params: Dict[str, Any], user_input: str) -> Dict[str, Any]:
-        """Charla breve: saludos, estados de ánimo, presentación, etc."""
+        """Charla breve: saludos, estados de ánimo, presentación, memoria, etc."""
         text = (user_input or params.get("topic") or "").strip()
         if not text:
             return {"result": "Dime algo y trataré de ayudarte.", "source": "templates"}
 
         norm = self._normalize(text)
+
+        # CONCIENCIA N2: preguntas sobre lo que conozco del usuario
+        if self._is_user_name_question(norm):
+            return self._answer_user_name()
+        if self._is_preference_question(norm):
+            return self._answer_preferences("preferencia")
+
+        # CONCIENCIA N1: recuperar conversaciones pasadas (vía plantillas,
+        # así funciona también sin Gemini)
+        if self._is_recall_question(norm):
+            return self._template_smalltalk(text)
+
         if "me llamo" in norm:
             return self._change_name(params, text)
         if any(re.search(rf"\b{re.escape(keyword)}\b", norm) for keyword in _HELP_KEYWORDS):
@@ -371,8 +607,20 @@ class DialogAgent(AgentBase):
         )
 
     def _template_smalltalk(self, text: str) -> Dict[str, Any]:
-        """Responde con plantillas predefinidas."""
+        """Responde con plantillas predefinidas (incluye memoria N1/N2)."""
         norm = self._normalize(text)
+
+        # CONCIENCIA N1: recordar conversaciones pasadas
+        if self._is_recall_question(norm):
+            match = re.search(
+                r"(?:recuerdas cuando|te acuerdas cuando|do you remember|remember when)\s+(.+)",
+                text,
+                flags=re.IGNORECASE,
+            )
+            if match:
+                return self._search_memory(match.group(1))
+            return self._summarize_recent()
+
         for keywords, response in _SMALLTALK_RULES:
             for keyword in keywords:
                 if re.search(rf"\b{re.escape(keyword)}\b", norm):

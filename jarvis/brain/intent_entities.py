@@ -20,7 +20,7 @@ Interfaz:
 """
 
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from brain.intent_data import INTENT_CATALOG, FILLERS
 
@@ -136,6 +136,37 @@ class EntityExtractor:
             if value:
                 entities.setdefault(slot, value)
         return entities
+
+    # ── Hechos declarativos (CONCIENCIA N2 - memoria semántica) ──
+
+    def extract_facts(self, text: str) -> List[Dict[str, str]]:
+        """Detecta hechos declarativos del usuario a partir de su frase.
+
+        Declaración de honestidad: esto NO es comprensión real del mundo;
+        es extracción basada en patrones lingüísticos que convierte frases
+        en tuplas (fact_type, fact_value) persistentes y verificables.
+
+        Returns:
+            Lista de dicts: {"fact_type", "fact_value", "confidence", "source"}.
+        """
+        facts: List[Dict[str, str]] = []
+        if not text:
+            return facts
+        for fact_type, pattern, confidence in _FACT_PATTERNS:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if not match:
+                continue
+            value = self._clean(match.group(1))
+            # Cortar listas ("rock y pop" -> "rock") y puntuación final
+            value = re.split(r"\s+(?:y|and|e|o)\s+", value)[0].strip(" .,;:¿?¡!()")
+            if value:
+                facts.append({
+                    "fact_type": fact_type,
+                    "fact_value": value,
+                    "confidence": confidence,
+                    "source": "entity_extractor",
+                })
+        return facts
 
     # ── Helpers genéricos ──
 
@@ -331,3 +362,27 @@ _SLOT_HANDLERS: Dict[str, str] = {
     "currency_from": "_extract_currency_from",
     "currency_to": "_extract_currency_to",
 }
+
+# Patrones de hechos declarativos: (fact_type, regex con grupo capturador, confidence)
+_FACT_PATTERNS: List[Tuple[str, str, float]] = [
+    (
+        "nombre",
+        r"(?:me llamo|mi nombre es|my name is)\s+(\w+)",
+        0.95,
+    ),
+    (
+        "preferencia",
+        r"(?:me gusta|me gustan|me encanta|i like|i love)\s+(?:el |la |los |las |the )?([\w\s]+)",
+        0.80,
+    ),
+    (
+        "lugar",
+        r"(?:vivo en|soy de|i live in|i am from)\s+([\w\s]+)",
+        0.85,
+    ),
+    (
+        "tarea",
+        r"(?:tengo que|debo|i have to)\s+([\w\s]+)",
+        0.70,
+    ),
+]

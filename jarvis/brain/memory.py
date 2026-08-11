@@ -164,6 +164,18 @@ class LongTermMemory:
                 )
             """)
 
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS facts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    fact_type TEXT,
+                    fact_value TEXT,
+                    confidence REAL DEFAULT 0.8,
+                    source TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(fact_type, fact_value)
+                )
+            """)
+
             conn.commit()
 
     async def save(self, key: str, value: Any, metadata: Dict = None, importance: str = "normal"):
@@ -266,6 +278,120 @@ class LongTermMemory:
                 })
             return results
 
+    # ── Memoria episódica (CONCIENCIA N1) ──
+
+    async def get_recent(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """Devuelve las últimas conversaciones (nuevas primero)."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._get_recent_sync, limit)
+
+    def _get_recent_sync(self, limit: int = 5) -> List[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT timestamp, user_message, agent_response, intent
+                FROM conversations ORDER BY id DESC LIMIT ?
+            """, (limit,))
+            return [
+                {
+                    "timestamp": row[0],
+                    "user_message": row[1],
+                    "agent_response": row[2],
+                    "intent": row[3],
+                }
+                for row in cursor.fetchall()
+            ]
+
+    # ── Memoria semántica / hechos (CONCIENCIA N2) ──
+
+    async def save_fact(
+        self,
+        fact_type: str,
+        fact_value: str,
+        confidence: float = 0.8,
+        source: Optional[str] = None,
+    ):
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None, self._save_fact_sync, fact_type, fact_value, confidence, source
+        )
+
+    def _save_fact_sync(
+        self,
+        fact_type: str,
+        fact_value: str,
+        confidence: float = 0.8,
+        source: Optional[str] = None,
+    ):
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO facts (fact_type, fact_value, confidence, source)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(fact_type, fact_value) DO UPDATE SET
+                    confidence = excluded.confidence,
+                    source = excluded.source
+            """, (fact_type, fact_value, confidence, source))
+            conn.commit()
+
+    async def get_facts(
+        self, fact_type: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._get_facts_sync, fact_type)
+
+    def _get_facts_sync(
+        self, fact_type: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            if fact_type:
+                cursor.execute("""
+                    SELECT fact_type, fact_value, confidence, source, created_at
+                    FROM facts WHERE fact_type = ? ORDER BY created_at DESC
+                """, (fact_type,))
+            else:
+                cursor.execute("""
+                    SELECT fact_type, fact_value, confidence, source, created_at
+                    FROM facts ORDER BY created_at DESC
+                """)
+            return [
+                {
+                    "fact_type": row[0],
+                    "fact_value": row[1],
+                    "confidence": row[2],
+                    "source": row[3],
+                    "created_at": row[4],
+                }
+                for row in cursor.fetchall()
+            ]
+
+    async def search_facts(
+        self, query: str, limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self._search_facts_sync, query, limit)
+
+    def _search_facts_sync(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT fact_type, fact_value, confidence, source, created_at
+                FROM facts
+                WHERE fact_value LIKE ? OR fact_type LIKE ?
+                ORDER BY created_at DESC LIMIT ?
+            """, (f"%{query}%", f"%{query}%", limit))
+            return [
+                {
+                    "fact_type": row[0],
+                    "fact_value": row[1],
+                    "confidence": row[2],
+                    "source": row[3],
+                    "created_at": row[4],
+                }
+                for row in cursor.fetchall()
+            ]
+
     async def save_preference(self, key: str, value: str):
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, self._save_preference_sync, key, value)
@@ -331,6 +457,8 @@ class LongTermMemory:
             preferences_count = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM entities")
             entities_count = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM facts")
+            facts_count = cursor.fetchone()[0]
             db_size = self.db_path.stat().st_size if self.db_path.exists() else 0
             return {
                 "name": "long_term",
@@ -338,10 +466,15 @@ class LongTermMemory:
                 "memories": memories_count,
                 "preferences": preferences_count,
                 "entities": entities_count,
-                "total_items": conversations_count + memories_count + preferences_count + entities_count,
+                "facts": facts_count,
+                "total_items": conversations_count + memories_count + preferences_count + entities_count + facts_count,
                 "db_size_bytes": db_size,
                 "db_path": str(self.db_path)
             }
+
+    def close(self):
+        """Sin conexión persistente que cerrar; se mantiene por simetría."""
+        pass
 
 
 class MemoryManager:
@@ -412,6 +545,48 @@ class MemoryManager:
         results = await self.search(query, limit)
         return results["conversaciones"]
 
+    # ── Memoria episódica (CONCIENCIA N1) ──
+
+    async def get_recent(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """Últimas conversaciones persistentes (nuevas primero)."""
+        return await self.long_term.get_recent(limit)
+
+    def get_recent_sync(self, limit: int = 5) -> List[Dict[str, Any]]:
+        """Versión síncrona para uso en agentes (degradación elegante)."""
+        return self.long_term._get_recent_sync(limit)
+
+    # ── Memoria semántica / hechos (CONCIENCIA N2) ──
+
+    async def save_fact(
+        self,
+        fact_type: str,
+        fact_value: str,
+        confidence: float = 0.8,
+        source: Optional[str] = None,
+    ):
+        await self.long_term.save_fact(fact_type, fact_value, confidence, source)
+
+    def save_fact_sync(
+        self,
+        fact_type: str,
+        fact_value: str,
+        confidence: float = 0.8,
+        source: Optional[str] = None,
+    ):
+        self.long_term._save_fact_sync(fact_type, fact_value, confidence, source)
+
+    async def get_facts(self, fact_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        return await self.long_term.get_facts(fact_type)
+
+    def get_facts_sync(self, fact_type: Optional[str] = None) -> List[Dict[str, Any]]:
+        return self.long_term._get_facts_sync(fact_type)
+
+    async def search_facts(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        return await self.long_term.search_facts(query, limit)
+
+    def search_facts_sync(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+        return self.long_term._search_facts_sync(query, limit)
+
     async def cleanup_old_memories(self, days: int = 30):
         await self.long_term.cleanup_old_memories(days)
 
@@ -423,3 +598,8 @@ class MemoryManager:
 
     async def clear(self):
         self.short_term.clear()
+
+    # ==================== Cierre ====================
+
+    def close(self):
+        self.long_term.close()
