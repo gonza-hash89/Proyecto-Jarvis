@@ -416,27 +416,59 @@ class ConfidenceBasedStrategy(DecisionStrategy):
 class ContextAwareStrategy(DecisionStrategy):
     """
     Estrategia sensible al contexto.
-    Considera el historial y el estado del sistema.
+    Considera el historial y el estado del sistema (CONCIENCIA N3).
     """
-    
+
+    def _inherit_entities(
+        self,
+        current: Intent,
+        context: DecisionContext,
+    ) -> List[str]:
+        """Completa entidades faltantes de la intención actual con las del
+        turno anterior (elipsis: "¿y pasado mañana?" hereda la ciudad)."""
+        inherited: List[str] = []
+        params = current.parameters
+        if not isinstance(params, dict):
+            params = {}
+            current.parameters = params
+        for prev in context.get_recent_intents(3):
+            if prev is current:
+                continue
+            prev_params = getattr(prev, "parameters", None)
+            if not isinstance(prev_params, dict):
+                continue
+            for key, value in prev_params.items():
+                if key not in params:
+                    params[key] = value
+                    inherited.append(key)
+        return inherited
+
     def decide(
-        self, 
-        intents: List[Intent], 
+        self,
+        intents: List[Intent],
         context: DecisionContext
     ) -> Optional[Decision]:
         """Toma decisión considerando contexto detallado"""
-        
+
         if not intents:
             return None
-        
+
+        # Elipsis de entidades: heredar del turno anterior (N3)
+        inherited = self._inherit_entities(intents[0], context)
+
         # Para esta versión, usamos confidence_based como base
         base_strategy = ConfidenceBasedStrategy(self.config, self.logger)
         decision = base_strategy.decide(intents, context)
-        
+
         if decision:
             # Ajustar según contexto
             decision.reasoning += "\n[Context-aware adjustments applied]"
-        
+            if inherited:
+                decision.reasoning += (
+                    f"\n[Context: entidades heredadas del turno anterior: "
+                    f"{', '.join(inherited)}]"
+                )
+
         return decision
 
 
