@@ -25,6 +25,7 @@ class AgentFactory:
         AgentType.WEB: ("agents.web", "WebAgent"),
         AgentType.DIALOG: ("agents.dialog", "DialogAgent"),
         AgentType.FILE: ("agents.file", "FileAgent"),
+        AgentType.VOICE: ("agents.voice", "VoiceAgent"),
     }
 
     def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:

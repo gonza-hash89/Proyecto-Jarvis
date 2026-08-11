@@ -218,7 +218,6 @@ def test_create_string_desconocida():
 
 
 def test_create_no_soportado():
-    assert AgentFactory().create(AgentType.VOICE) is None
     assert AgentFactory().create(AgentType.MEMORY) is None
 
 
