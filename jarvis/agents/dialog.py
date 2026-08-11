@@ -102,6 +102,56 @@ _TRANSLATE_MARKERS = (
     " al", " a ",
 )
 
+# ── Autoconciencia funcional (CONCIENCIA N4) ──
+
+_INTROSPECTION_WHY = (
+    "por que me respondiste", "por que respondiste", "por que dijiste",
+    "por que contestaste", "por que me contestaste",
+)
+_INTROSPECTION_STATUS = (
+    "que estas haciendo", "cual es tu estado", "cual es el estado",
+    "en que estas", "que estas haciendo ahora", "estas ocupado",
+)
+_INTROSPECTION_UNKNOWN = (
+    "que no sabes hacer", "que no puedes hacer", "que no haces",
+    "que no sabes", "que no puedes", "que te falta",
+)
+_INTROSPECTION_ARCH = (
+    "como funcionas", "como funciono", "como estas programado",
+    "como esta construido", "como es tu arquitectura", "como estas hecho",
+    "como funciona tu",
+)
+
+# Intenciones del catálogo resueltas fuera del DialogAgent (orquestador +
+# agentes System/Web/File/Calendar/Voice). Se usa como respaldo cuando no hay
+# memoria para calcularlo desde el estado real.
+_IMPLEMENTED_ELSEWHERE: frozenset = frozenset({
+    # Acciones directas del orquestador
+    "time_query", "date_query", "play_music", "watch_videos", "search_info",
+    "open_application", "take_screenshot", "tell_joke", "system_control",
+    "change_name", "exit", "take_notes", "create_task", "set_timer",
+    "watch_streaming", "play_podcast", "news_query", "directions",
+    "traffic_info", "book_ride", "flight_booking", "hotel_booking",
+    "weather_query",
+    # WebAgent
+    "get_exchange_rate", "crypto_price", "check_investments",
+    # SystemAgent
+    "volume_control", "open_folder", "empty_trash", "lock_session",
+    # FileAgent
+    "list_tasks", "complete_task", "read_file", "list_folder", "reminder_set",
+    # CalendarAgent
+    "calendar_event",
+    # VoiceAgent
+    "speak_text", "listen_voice", "calibrate_mic",
+})
+
+# Marcas de respuestas débiles para la auto-evaluación post-respuesta (N4).
+_WEAK_MARKERS = (
+    "en desarrollo", "no tengo implementada", "no pude", "no encontré",
+    "no estoy seguro", "no tengo memoria", "no tengo disponible",
+    "no tengo un tema anterior",
+)
+
 
 class DialogAgent(AgentBase):
     """Agente conversacional con modo Gemini opcional y plantillas."""
@@ -153,14 +203,17 @@ class DialogAgent(AgentBase):
 
         handler = self._handlers.get(intent)
         if handler is None:
-            return self._result(
-                "success",
-                {"result": f"Intención '{intent}' en desarrollo", "source": "internal"},
-            )
+            data = {
+                "result": f"Intención '{intent}' en desarrollo",
+                "source": "internal",
+            }
+            data = self._self_evaluate(intent, user_input, data)
+            return self._result("success", data)
 
         try:
             data = handler(params, user_input)
             self._remember_detected_facts(user_input)
+            data = self._self_evaluate(intent, user_input, data)
             return self._result("success", data)
         except Exception as e:
             self.record_error(f"process:{intent}", e)
@@ -586,6 +639,12 @@ class DialogAgent(AgentBase):
 
         norm = self._normalize(text)
 
+        # CONCIENCIA N4: preguntas de autoconciencia (por qué respondiste,
+        # estado actual, límites, arquitectura)
+        introspection = self._introspection_response(norm)
+        if introspection is not None:
+            return introspection
+
         # CONCIENCIA N2: preguntas sobre lo que conozco del usuario
         if self._is_user_name_question(norm):
             return self._answer_user_name()
@@ -688,6 +747,195 @@ class DialogAgent(AgentBase):
                 rest = rest[:m]
                 break
         return rest.strip().strip(" ¿?¡!.,:;'\"¿")
+
+    # ==================== AUTOCONCIENCIA FUNCIONAL (CONCIENCIA N4) ====================
+    # Declaración de honestidad: las respuestas se generan desde datos reales
+    # (historial de decisión, catálogo, memoria), no texto fijo.
+
+    def _introspection_response(self, norm: str) -> Optional[Dict[str, Any]]:
+        """Devuelve la respuesta de introspección según la pregunta, o None."""
+        if any(k in norm for k in _INTROSPECTION_WHY):
+            return self._explain_last_decision()
+        if any(k in norm for k in _INTROSPECTION_STATUS):
+            return self._system_status()
+        if any(k in norm for k in _INTROSPECTION_UNKNOWN):
+            return self._unknown_intents()
+        if any(k in norm for k in _INTROSPECTION_ARCH):
+            return self._explain_architecture()
+        return None
+
+    def _memory_context(self, key: str) -> Optional[Any]:
+        """Lee una clave del contexto de memoria, con degradación elegante."""
+        if self._memory is None:
+            return None
+        try:
+            context = _run_coro(self._memory.get_context()) or {}
+        except Exception as e:
+            self.record_error("introspection_context", e)
+            return None
+        if not isinstance(context, dict):
+            return None
+        return context.get(key)
+
+    def _explain_last_decision(self) -> Dict[str, Any]:
+        """Narra el proceso real de la última decisión (N4)."""
+        last = self._memory_context("last_decision")
+        if not last:
+            return {
+                "result": (
+                    "Todavía no tengo un proceso reciente que explicarte. "
+                    "Pídeme algo y te contaré cómo lo resolví."
+                ),
+                "source": "templates",
+            }
+        intent = last.get("intent") or "unknown"
+        input_text = last.get("input") or "(sin texto)"
+        confidence = last.get("confidence")
+        agent = last.get("agent")
+        reasoning = last.get("reasoning")
+
+        lines = [f"Tu frase fue: \"{input_text}\"."]
+        if isinstance(confidence, (int, float)):
+            lines.append(
+                f"Reconocí la intención '{intent}' con una confianza "
+                f"del {confidence * 100:.0f}%."
+            )
+        else:
+            lines.append(f"Reconocí la intención '{intent}'.")
+        if agent:
+            lines.append(f"Decidí enviarla al agente '{agent}'.")
+        if reasoning:
+            lines.append("Mi razonamiento fue:")
+            lines.extend(f"- {line}" for line in reasoning.splitlines())
+        return {
+            "result": "\n".join(lines),
+            "source": "memory",
+            "decision": {
+                "intent": intent,
+                "agent": agent,
+                "confidence": confidence,
+            },
+        }
+
+    def _system_status(self) -> Dict[str, Any]:
+        """Describe el estado real del sistema (N4)."""
+        status = self._memory_context("system_status")
+        if isinstance(status, dict):
+            lines = [
+                f"Nombre: {status.get('assistant_name')}",
+                f"Estado: {status.get('state')}",
+                f"Módulos listos: {'sí' if status.get('modules_ready') else 'no'}",
+                f"Intenciones disponibles: {status.get('intents_available')}",
+            ]
+            agents = status.get("agents")
+            if agents:
+                lines.append(f"Agentes activos: {', '.join(agents)}")
+            return {
+                "result": "Mi estado actual es:\n" + "\n".join(lines),
+                "source": "memory",
+            }
+        # Fallback honesto sin orquestador conectado
+        gemini = "Gemini activo" if self._gemini_enabled() else "plantillas"
+        memoria = (
+            "conectada"
+            if self._memory is not None
+            else "no disponible en este modo"
+        )
+        return {
+            "result": (
+                f"Soy {self._assistant_name}. Motor de conversación: {gemini}. "
+                f"Memoria persistente: {memoria}."
+            ),
+            "source": "templates",
+        }
+
+    def _capabilities(self) -> Optional[Dict[str, Any]]:
+        """Capacidades reales (implementadas/pendientes) desde la memoria."""
+        caps = self._memory_context("capabilities")
+        if isinstance(caps, dict) and caps.get("pending"):
+            return caps
+        return None
+
+    def _unknown_intents(self) -> Dict[str, Any]:
+        """Lista real de intenciones sin implementar (N4)."""
+        caps = self._capabilities()
+        if caps is not None:
+            pending = [p for p in caps.get("pending", []) if p in INTENT_CATALOG]
+            source = "memory"
+        else:
+            implemented = set(self._handlers.keys()) | set(_IMPLEMENTED_ELSEWHERE)
+            pending = sorted(
+                name for name in INTENT_CATALOG if name not in implemented
+            )
+            source = "templates"
+
+        if not pending:
+            return {
+                "result": "Tengo implementadas todas las intenciones del catálogo.",
+                "source": source,
+                "pending_count": 0,
+                "pending": [],
+            }
+
+        lines = ["Estas intenciones aún están en desarrollo:"]
+        for name in pending:
+            intent = INTENT_CATALOG[name]
+            variations = intent.get("variations_es") or []
+            example = variations[0] if variations else f"/{name}"
+            lines.append(f'- "{example}"   (comando: {name})')
+        return {
+            "result": "\n".join(lines),
+            "source": source,
+            "pending_count": len(pending),
+            "pending": pending,
+        }
+
+    def _explain_architecture(self) -> Dict[str, Any]:
+        """Explica la arquitectura real de Jarvis (N4)."""
+        lines = [
+            "Funciono en capas deterministas y testeables:",
+            "1. Reconocimiento: brain/intent_processor.py (patrones regex + modelo ML).",
+            "2. Decisión: brain/decision.py elige agente según confianza y contexto.",
+            "3. Ejecución: agentes especializados (System, Web, Dialog, File, Calendar).",
+            "4. Memoria: brain/memory.py (SQLite + RAM) guarda conversaciones y hechos.",
+            "5. Orquestación: orchestrator/orchestrator.py coordina todo por eventos.",
+        ]
+        if self._gemini_enabled():
+            lines.append("Además puedo usar Gemini para conversación libre (opcional).")
+        return {
+            "result": "\n".join(lines),
+            "source": "templates",
+        }
+
+    def _self_evaluate(
+        self,
+        intent: str,
+        user_input: str,
+        data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Auto-evaluación post-respuesta: detecta respuestas débiles (N4).
+
+        No modifica la respuesta: adjunta la evaluación como metadata honesta
+        y registra la debilidad para mejoras futuras.
+        """
+        if not isinstance(data, dict):
+            return data
+        result = data.get("result") or ""
+        weak = (not result) or any(
+            marker in result.lower() for marker in _WEAK_MARKERS
+        )
+        evaluation: Dict[str, Any] = {"intent": intent, "weak": weak}
+        if weak:
+            evaluation["note"] = "respuesta débil detectada"
+            evaluation["suggestion"] = (
+                "Puedes pedirme 'ayuda' o decir 'qué puedes hacer' "
+                "para ver mis comandos."
+            )
+            self.logger.warning(
+                f"[auto-evaluación] respuesta débil para '{intent}': {result[:80]}"
+            )
+        data["evaluation"] = evaluation
+        return data
 
     # ==================== UTILIDADES ====================
 

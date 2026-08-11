@@ -38,7 +38,9 @@ from core.config import get_config
 from core.logger import JarvisLogger, AgentLogger, init_logger
 from core.intent_recognizer import IntentRecognizer, Intent
 from brain.intent_processor import IntentProcessor, get_processor
+from brain.intent_data import INTENT_CATALOG
 from brain.memory import MemoryManager
+from brain.shortterm_context import ShortTermContext
 from brain.decision import (
     AgentType,
     DecisionEngine,
@@ -146,6 +148,59 @@ _AGENT_ROUTING: Dict[str, AgentType] = {
     "help_query": AgentType.DIALOG,
     "translate_text": AgentType.DIALOG,
 }
+
+
+# Acciones directas del orquestador (fallback cuando no hay agente dedicado).
+_DIRECT_ACTION_HANDLERS: Dict[str, str] = {
+    "time_query": "_action_time",
+    "date_query": "_action_date",
+    "play_music": "_action_play_music",
+    "watch_videos": "_action_youtube",
+    "search_info": "_action_wikipedia",
+    "open_application": "_action_open_app",
+    "take_screenshot": "_action_screenshot",
+    "tell_joke": "_action_joke",
+    "system_control": "_action_system_control",
+    "change_name": "_action_change_name",
+    "exit": "_action_exit",
+    "take_notes": "_action_take_notes",
+    "create_task": "_action_create_task",
+    "set_timer": "_action_set_timer",
+    "watch_streaming": "_action_streaming",
+    "play_podcast": "_action_podcast",
+    "news_query": "_action_news",
+    "directions": "_action_directions",
+    "traffic_info": "_action_traffic",
+    "book_ride": "_action_book_ride",
+    "flight_booking": "_action_flight_booking",
+    "hotel_booking": "_action_hotel_booking",
+    "weather_query": "_action_weather",
+}
+
+
+_AGENT_LABELS: Dict[str, str] = {
+    "voice_agent": "el agente de voz",
+    "dialog_agent": "el agente conversacional",
+    "memory_agent": "el agente de memoria",
+    "system_agent": "el agente de sistema",
+    "web_agent": "el agente web",
+    "file_agent": "el agente de archivos",
+    "calendar_agent": "el agente de agenda",
+    "creative_agent": "el agente creativo",
+}
+
+
+# Preguntas de autoconciencia (CONCIENCIA N4): se redirigen al DialogAgent.
+_INTROSPECTION_MARKERS: tuple = (
+    "por que me respondiste", "por que respondiste", "por que dijiste",
+    "por que contestaste", "por que me contestaste",
+    "que estas haciendo", "cual es tu estado", "cual es el estado",
+    "en que estas", "que estas haciendo ahora",
+    "que no sabes hacer", "que no puedes hacer", "que no haces",
+    "que no sabes", "que no puedes",
+    "como funcionas", "como funciono", "como estas programado",
+    "como esta construido", "como es tu arquitectura", "como estas hecho",
+)
 
 
 # ==================== ESTADOS DE JARVIS ====================
@@ -302,18 +357,26 @@ class Orchestrator:
             f"IntentProcessor híbrido inicializado ({self.intent_processor.pattern_matcher.get_intent_count()} intenciones)"
         )
 
-        # 5. Motor de decisiones
-        self.decision_engine = DecisionEngine()
+        # 5. Motor de decisiones (estrategia contextual: N3)
+        self.decision_engine = DecisionEngine(strategy="context_aware")
         self.decision_context = DecisionContext(
             user_id="local_user",
             session_id=f"session_{int(time.time())}",
         )
-        self.logger.info("DecisionEngine inicializado")
+        self.logger.info("DecisionEngine inicializado (context_aware)")
+
+        # 5b. Contexto inmediato de turno (CONCIENCIA N3)
+        self.short_term_context = ShortTermContext(max_history=5)
+        self.logger.info("ShortTermContext inicializado")
 
         # 6. Agentes (Semana 5): registry + factory + event_bus
         self._init_agents()
 
         self.modules_ready = True
+
+        # CONCIENCIA N4: exponer estado y capacidades reales en memoria
+        self._store_capabilities()
+        self._store_status_snapshot()
 
     def _init_ws_server(self) -> None:
         """Inicializa el servidor WebSocket para la esfera visual (si está disponible)."""
@@ -331,8 +394,10 @@ class Orchestrator:
         """Crea y registra los agentes de Semana 5, asignándoles el event_bus."""
         self.agent_registry = AgentRegistry()
         self.agent_factory = AgentFactory()
+        memory = getattr(self, "memory", None)
+        agent_config = {"memory": memory} if memory is not None else None
         for agent_type in _AGENT_TYPES:
-            agent = self.agent_factory.create(agent_type)
+            agent = self.agent_factory.create(agent_type, config=agent_config)
             if agent is not None:
                 agent.event_bus = self.event_bus
                 self.agent_registry.register(agent)
@@ -674,10 +739,14 @@ class Orchestrator:
         # 1. Guardar en memoria de contexto
         self._run_async(self.memory.set_context("last_input", user_input))
 
-        # 2. Reconocer intención
-        intent = self._recognize_intent(user_input)
+        # 2. Resolver elipsis/pronombres contra el turno anterior (N3);
+        #    si no aplica, reconocer intención.
+        intent = self._resolve_with_context(user_input)
+        if intent is None:
+            intent = self._recognize_intent(user_input)
 
         # 3. Tomar decisión (cerebro estratégico)
+        decision = None
         if intent is not None:
             decision = self.decision_engine.decide([intent])
             if decision is None:
@@ -690,8 +759,13 @@ class Orchestrator:
         if intent is not None:
             response = self._execute_intent(intent, user_input, decision)
         else:
-            response = "Lo siento, no entendí eso."
+            response = self._clarify_or_default(user_input)
             self.speak(response)
+
+        # 4b. Actualizar contexto de turno (N3) y registrar la decisión (N4)
+        if intent is not None:
+            self._update_short_term_context(intent, user_input)
+        self._store_last_decision(user_input, intent, decision)
 
         # 5. Guardar la conversación en memoria persistente
         self._run_async(
@@ -723,8 +797,19 @@ class Orchestrator:
         try:
             result = self.intent_processor.recognize(user_input)
 
-            # Frases sin sentido: la fusión híbrida con baja confianza es "unknown"
-            if result.method != "pattern" and result.confidence < 0.25:
+            # Frases sin sentido: la fusión híbrida con baja confianza es "unknown".
+            # Antes de rendirse, comprobamos si es una pregunta de autoconciencia (N4).
+            if result.name == "unknown" or (
+                result.method != "pattern" and result.confidence < 0.25
+            ):
+                intro = self._introspection_intent(user_input)
+                if intro is not None:
+                    self._publish(
+                        JarvisEvent.INTENT_RECOGNIZED,
+                        {"intent": "smalltalk", "confidence": intro.confidence,
+                         "method": "introspection"},
+                    )
+                    return intro
                 self.logger.warning(f"Intención no reconocida: {user_input}")
                 self._publish(
                     JarvisEvent.INTENT_RECOGNIZED,
@@ -795,6 +880,190 @@ class Orchestrator:
             raw_text=user_input,
         )
 
+    # ==================== CONTEXTO INMEDIATO (CONCIENCIA N3) ====================
+
+    def _resolve_with_context(self, user_input: str) -> Optional[DecisionIntent]:
+        """Resuelve elipsis/pronombres contra el turno anterior (N3).
+
+        Returns:
+            Intent reconstruido con las entidades del turno anterior, o None
+            si la frase no es una continuación (el flujo sigue con el
+            reconocimiento normal).
+        """
+        stc = getattr(self, "short_term_context", None)
+        if stc is None or not stc.has_context():
+            return None
+        try:
+            resolved = stc.resolve(user_input)
+        except Exception as e:
+            self.logger.warning(f"No se pudo resolver contexto de turno: {e}")
+            return None
+        if resolved is None:
+            return None
+        self.logger.info(
+            f"Contexto de turno aplicado: '{user_input}' → "
+            f"{resolved['intent']} (razón: {resolved['reason']})"
+        )
+        return DecisionIntent(
+            id=f"intent_{int(time.time() * 1000)}",
+            name=resolved["intent"],
+            confidence=0.85,
+            parameters=resolved["entities"],
+            raw_text=user_input,
+        )
+
+    def _update_short_term_context(
+        self,
+        intent: DecisionIntent,
+        user_input: str,
+    ) -> None:
+        """Guarda el turno actual para resolver la próxima referencia (N3)."""
+        stc = getattr(self, "short_term_context", None)
+        if stc is None:
+            return
+        stc.update(intent.name, intent.parameters, user_input)
+
+    def _clarify_or_default(self, user_input: str) -> str:
+        """Si la frase es anafórica sin contexto, pide aclaración (N3)."""
+        stc = getattr(self, "short_term_context", None)
+        if stc is not None and stc.needs_clarification(user_input):
+            return (
+                f"¿A qué te refieres con '{user_input.strip()}'? "
+                "Todavía no tengo un tema anterior para relacionarlo."
+            )
+        return "Lo siento, no entendí eso."
+
+    # ==================== AUTOCONCIENCIA FUNCIONAL (CONCIENCIA N4) ====================
+
+    @staticmethod
+    def _is_introspection(user_input: str) -> bool:
+        """True si la frase es una pregunta sobre el propio Jarvis."""
+        norm = user_input.lower()
+        norm = norm.replace("á", "a").replace("é", "e").replace("í", "i") \
+                   .replace("ó", "o").replace("ú", "u").replace("ü", "u")
+        norm = "".join(
+            c for c in norm
+            if c in "abcdefghijklmnopqrstuvwxyzñ "
+        ).strip()
+        return any(marker in norm for marker in _INTROSPECTION_MARKERS)
+
+    def _introspection_intent(self, user_input: str) -> Optional[DecisionIntent]:
+        """Convierte una pregunta de autoconciencia en intent smalltalk (N4)."""
+        if not self._is_introspection(user_input):
+            return None
+        return DecisionIntent(
+            id=f"intent_{int(time.time() * 1000)}",
+            name="smalltalk",
+            confidence=0.98,
+            parameters={},
+            raw_text=user_input,
+        )
+
+    def _store_last_decision(
+        self,
+        user_input: str,
+        intent: Optional[DecisionIntent],
+        decision: Optional[Any],
+    ) -> None:
+        """Expone la última decisión real en memoria para que el DialogAgent
+        pueda explicarla (N4)."""
+        if getattr(self, "memory", None) is None:
+            return
+        summary = {
+            "input": user_input,
+            "intent": intent.name if intent else None,
+            "confidence": round(intent.confidence, 4) if intent else None,
+            "agent": decision.selected_agent.value if decision else None,
+            "reasoning": decision.reasoning if decision else None,
+        }
+        try:
+            self._run_async(self.memory.set_context("last_decision", summary))
+        except Exception as e:
+            self.logger.warning(f"No se pudo guardar la última decisión: {e}")
+
+    def _explain_last_decision(self) -> str:
+        """Narra la última decisión real del motor (N4)."""
+        engine = getattr(self, "decision_engine", None)
+        if engine is None:
+            return "No tengo un motor de decisiones activo en este momento."
+        try:
+            history = engine.get_decision_history(1)
+        except Exception as e:
+            self.logger.warning(f"No se pudo leer el historial: {e}")
+            return "No pude leer mi historial de decisiones."
+        if not history:
+            return (
+                "Todavía no he tomado ninguna decisión que pueda explicarte. "
+                "Pídeme algo y te contaré cómo lo resolví."
+            )
+
+        decision = history[-1]
+        intent = decision.intent
+        label = _AGENT_LABELS.get(
+            decision.selected_agent.value, decision.selected_agent.value
+        )
+        lines = [
+            f"Tu frase fue: \"{intent.raw_text or '(sin texto)'}\".",
+            f"Reconocí la intención '{intent.name}' con una confianza "
+            f"del {intent.confidence * 100:.0f}%.",
+            f"Decidí enviarla a {label} (confianza de decisión: "
+            f"{decision.confidence * 100:.0f}%).",
+            "Mi razonamiento fue:",
+        ]
+        reasoning = decision.reasoning or ""
+        lines.extend(f"  • {line}" for line in reasoning.splitlines())
+        return "\n".join(lines)
+
+    def _compute_capabilities(self) -> Dict[str, Any]:
+        """Intenciones implementadas vs. pendientes, desde el estado real."""
+        implemented = set(_DIRECT_ACTION_HANDLERS.keys())
+        registry = getattr(self, "agent_registry", None)
+        if registry is not None:
+            for agent in registry.list_all():
+                handlers = getattr(agent, "_handlers", None)
+                if isinstance(handlers, dict):
+                    implemented.update(handlers.keys())
+        pending = sorted(
+            name for name in INTENT_CATALOG if name not in implemented
+        )
+        return {
+            "implemented": sorted(implemented),
+            "pending": pending,
+        }
+
+    def _store_capabilities(self) -> None:
+        """Guarda las capacidades reales en memoria para el DialogAgent (N4)."""
+        if getattr(self, "memory", None) is None:
+            return
+        try:
+            self._run_async(
+                self.memory.set_context("capabilities", self._compute_capabilities())
+            )
+        except Exception as e:
+            self.logger.warning(f"No se pudieron guardar las capacidades: {e}")
+
+    def _store_status_snapshot(self) -> None:
+        """Guarda un snapshot compacto del estado para introspección (N4)."""
+        if getattr(self, "memory", None) is None:
+            return
+        registry = getattr(self, "agent_registry", None)
+        agents = []
+        if registry is not None:
+            agents = sorted(
+                a.agent_type for a in registry.list_all()
+            )
+        snapshot = {
+            "state": getattr(self, "state", None),
+            "modules_ready": getattr(self, "modules_ready", False),
+            "assistant_name": self._load_name(),
+            "agents": agents,
+            "intents_available": len(INTENT_CATALOG),
+        }
+        try:
+            self._run_async(self.memory.set_context("system_status", snapshot))
+        except Exception as e:
+            self.logger.warning(f"No se pudo guardar el estado: {e}")
+
     def _execute_intent(
         self,
         intent: DecisionIntent,
@@ -855,29 +1124,8 @@ class Orchestrator:
 
         # 2) Fallback: acciones directas para intenciones sin agente
         actions = {
-            "time_query": self._action_time,
-            "date_query": self._action_date,
-            "play_music": self._action_play_music,
-            "watch_videos": self._action_youtube,
-            "search_info": self._action_wikipedia,
-            "open_application": self._action_open_app,
-            "take_screenshot": self._action_screenshot,
-            "tell_joke": self._action_joke,
-            "system_control": self._action_system_control,
-            "change_name": self._action_change_name,
-            "exit": self._action_exit,
-            "take_notes": self._action_take_notes,
-            "create_task": self._action_create_task,
-            "set_timer": self._action_set_timer,
-            "watch_streaming": self._action_streaming,
-            "play_podcast": self._action_podcast,
-            "news_query": self._action_news,
-            "directions": self._action_directions,
-            "traffic_info": self._action_traffic,
-            "book_ride": self._action_book_ride,
-            "flight_booking": self._action_flight_booking,
-            "hotel_booking": self._action_hotel_booking,
-            "weather_query": self._action_weather,
+            name: getattr(self, method)
+            for name, method in _DIRECT_ACTION_HANDLERS.items()
         }
 
         handler = actions.get(intent.name)
