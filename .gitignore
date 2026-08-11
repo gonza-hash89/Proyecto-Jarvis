@@ -6,3 +6,4 @@ __pycache__/
 .pytest_cache/
 logs/
 decision_history.json
+jarvis/data/
