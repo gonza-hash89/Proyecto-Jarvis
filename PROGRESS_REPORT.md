@@ -1,6 +1,6 @@
 # 📊 REPORTE DE PROGRESO - PROYECTO JARVIS
 
-**Generado:** 2026-08-12 · **Semana:** 7 (Consciencia N3/N4) · **Estado:** ✅ SEMANA 7 COMPLETADA
+**Generado:** 2026-08-12 · **Semana:** 8 (Autonomía + Independencia parcial) · **Estado:** ✅ SEMANA 8 COMPLETADA
 
 ## 🎯 Estado General
 
@@ -13,7 +13,8 @@
 | **SEMANA 5** (Agentes Esenciales) | ✅ COMPLETADO | 100% |
 | **SEMANA 6** (Refinamiento y Memoria) | ✅ COMPLETADO | 100% |
 | **SEMANA 7** (Consciencia N3/N4) | ✅ COMPLETADO | 100% |
-| **Proyecto General** | ⏳ EN PROGRESO | 64% |
+| **SEMANA 8** (Autonomía + Independencia parcial) | ✅ COMPLETADO | 100% |
+| **Proyecto General** | ⏳ EN PROGRESO | 76% |
 
 ## 📈 Gráfico de Progreso
 
@@ -25,8 +26,9 @@ Semana 4 (Intent):    ███████████████████�
 Semana 5 (Agentes):   ████████████████████ 100% ✅
 Semana 6 (Memoria):   ████████████████████ 100% ✅
 Semana 7 (Consciencia):████████████████████ 100% ✅
+Semana 8 (Autonomía): ████████████████████ 100% ✅
 ──────────────────────────────────────────────────
-Total Proyecto:        █████████████░░░░░░░  64% ⏳
+Total Proyecto:        ███████████████░░░░░  76% ⏳
 ```
 
 ## 🧠 CONSCIENCIA FUNCIONAL N0-N4 COMPLETA
@@ -533,31 +535,60 @@ SEMANA 4 (Intent Recognizer Híbrido):
 - pycaw no instalado → degradación perfecta a "en desarrollo" sin excepciones
 - El `_AGENT_ROUTING` + `selected_agent` del DecisionEngine se complementan bien
 
+## 🤖 AUTONOMÍA + INDEPENDENCIA PARCIAL (SEMANA 8) COMPLETA
+
+Jarvis deja de ser 100% reactivo: puede organizar, monitorear, coordinar
+y hasta generar respuestas "por sí mismo", todo con degradación elegante
+y sin APIs externas obligatorias.
+
+```
+F1  TaskPlanner (brain/planner.py): metas multi-paso ("organiza mi semana")
+    → decompose (sub-tareas ordenadas) → execute_plan con plan alternativo
+    ante fallos → report_progress. Integrado en process_input del orquestador.
+F2  ProactiveEngine (brain/proactive.py): hilo daemon que avisa recordatorios
+    vencidos (una vez), detecta hábitos (intención + franja horaria) y vigila
+    criptomonedas (umbral 3%, fetch inyectable, degrada sin red).
+F3  AgentCoordinator (brain/agent_coordinator.py): observa el bus, deriva
+    eventos de dominio (weather_data_ready, task_completed) y ejecuta
+    pipelines multi-agente con timeout (síncrono y en hilo daemon).
+F4  LocalLLM (brain/local_llm.py): cadena Ollama (localhost) → Gemini
+    (opcional) → plantillas honestas. Enriquece respuestas de intenciones
+    no implementadas sin reemplazar la verdad.
+```
+
+Declaración de honestidad: la "autonomía" es determinista y observable:
+planes por plantillas, monitoreo por reglas, coordinación por eventos y
+un LLM local opcional. Nada es iniciativa mágica. Todo tiene tests.
+
 ## 📞 Estado del Equipo
 
 ```
 ✅ Código: EXCELENTE CALIDAD
-✅ Tests: 388 PASANDO + COBERTURA 97% EN AGENTES (S5)
+✅ Tests: 455 PASANDO + COBERTURA 97% EN AGENTES (S5)
 ✅ Documentación: EXHAUSTIVA
 ✅ Consciencia funcional: N0-N4 COMPLETA (reconocimiento → memoria → contexto → introspección)
+✅ Autonomía parcial: TaskPlanner + ProactiveEngine + Coordinator + LocalLLM (S8)
 ✅ Listo para producción: SÍ (modo texto; voz opcional)
-✅ Listo para SEMANA 8: SÍ
+✅ Listo para SEMANA 9: SÍ
 ```
 
 ## 🎉 Conclusión
 
-**SEMANA 7 COMPLETADA EXITOSAMENTE** 🚀
+**SEMANA 8 COMPLETADA EXITOSAMENTE** 🚀
 
-Jarvis ya no solo **ejecuta** intenciones (S5/S6), ahora puede **explicarse a sí mismo**:
+Jarvis ya no solo **reacciona** (S5/S6) ni **se explica** (S7), ahora tiene
+**autonomía parcial**: organiza sus propias tareas, vigila recordatorios,
+coordina agentes por eventos y puede generar texto con un LLM local opcional.
 
-- 🧠 **N3 Contexto**: entiende referencias al turno anterior (elipsis/pronombres)
-- 🪞 **N4 Autoconciencia**: responde honestamente qué hace, qué no sabe y cómo funciona,
-  leyendo su estado real desde la memoria
-- 📊 **388 tests verdes** respaldan la declaración de honestidad: nada es magia, todo es observable
+- 🗺️ **F1 TaskPlanner**: "organiza mi semana" → pasos encadenados con planes alternativos
+- ⚡ **F2 ProactiveEngine**: recordatorios, hábitos y criptomonedas en segundo plano
+- 🤝 **F3 AgentCoordinator**: eventos de dominio + pipelines multi-agente con timeout
+- 🧠 **F4 LocalLLM**: Ollama → Gemini → plantillas, sin depender de la nube
+- 📊 **455 tests verdes** respaldan la declaración de honestidad: todo observable
 
-**El flujo completo ya funciona:** memoria → intención (híbrido) → decisión (con contexto) → agente → acción → respuesta con auto-evaluación.
+**El flujo completo ya funciona:** entrada → plan/monitoreo/coordinación → agentes → eventos → respuesta.
 
-La consciencia funcional de Jarvis está **completa de N0 a N4**. 🎯
+La autonomía funcional de Jarvis está **en marcha desde la Semana 8**. 🎯
 
 ---
 
