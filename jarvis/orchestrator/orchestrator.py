@@ -44,6 +44,7 @@ from brain.shortterm_context import ShortTermContext
 from brain.planner import TaskPlanner
 from brain.proactive import ProactiveEngine
 from brain.agent_coordinator import AgentCoordinator
+from brain.local_llm import LocalLLM
 from brain.decision import (
     AgentType,
     DecisionEngine,
@@ -275,6 +276,9 @@ class Orchestrator:
         # Coordinador de agentes (SEMANA 8, FASE 3)
         self.coordinator: Optional[AgentCoordinator] = None
 
+        # LLM local opcional (SEMANA 8, FASE 4): Ollama → Gemini → plantillas.
+        self.local_llm: Optional[LocalLLM] = None
+
         # WebSocket server para esfera visual
         self.ws_server: Optional[WebSocketServer] = None
         self._ws_thread: Optional[threading.Thread] = None
@@ -432,6 +436,11 @@ class Orchestrator:
         )
         self.coordinator.subscribe_events()
         self.logger.info("AgentCoordinator inicializado")
+
+        # 6c. LLM local opcional (SEMANA 8, FASE 4): no bloquea al arrancar;
+        #     available() hace ping a Ollama solo cuando se necesita.
+        self.local_llm = LocalLLM()
+        self.logger.info("LocalLLM inicializado (Ollama → Gemini → plantillas)")
 
         self.modules_ready = True
 
@@ -1212,6 +1221,22 @@ class Orchestrator:
         handler = actions.get(intent.name)
         if handler is None:
             message = f"Aún no tengo implementada la acción '{intent.name}'."
+            # SEMANA 8 FASE 4: si hay un LLM local disponible, enriquecer la
+            # respuesta honesta con una sugerencia (sin reemplazarla).
+            llm = getattr(self, "local_llm", None)
+            if llm is not None:
+                try:
+                    if llm.available():
+                        suggestion = llm.generate_text(
+                            "El usuario pidió: " + (user_input or "") + ". "
+                            "Dime breve y honestamente que Jarvis no implementa "
+                            "aún esta acción, y sugiere qué tarea sí puede hacer.",
+                            system="Eres Jarvis, asistente en español.",
+                        )
+                        if suggestion:
+                            message = f"{message} {suggestion}"
+                except Exception as e:
+                    self.logger.warning(f"LocalLLM falló para '{intent.name}': {e}")
             self.logger.warning(message)
             self.speak(message)
             self._publish(
