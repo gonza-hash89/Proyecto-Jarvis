@@ -22,6 +22,35 @@ Un asistente de voz inteligente en español e inglés que puede realizar múltip
 - 📺 Streaming (Netflix/Prime/Disney/HBO), podcasts, noticias
 - 🗺️ Mapas, rutas, tráfico, Uber, vuelos y hoteles
 - 🌦️ Clima (buscador web)
+- 🖥️ **System Agent**: apagar/reiniciar, apps, carpetas, captura, volumen, papelera
+- 🌐 **Web Agent**: clima (Open-Meteo), cripto (CoinGecko), noticias, búsqueda, sin API keys
+- 💬 **Dialog Agent**: chistes, traducción (MyMemory), ayuda, cambio de nombre, Gemini opcional
+- 📁 **File Agent**: notas, tareas, recordatorios y archivos
+- 📅 **Email/Calendar Agent**: IMAP + Google Calendar (degradación elegante)
+- 🧠 **Memoria episódica (N1)**: recuerda conversaciones entre sesiones (SQLite)
+- 🧠 **Memoria semántica (N2)**: recuerda hechos sobre ti (nombre, preferencias)
+- 🧠 **Contexto a corto plazo (N3)**: resuelve elipsis/pronombres ("¿y pasado mañana?")
+- 🪞 **Autoconciencia funcional (N4)**: explica por qué respondió, su estado, sus límites
+  y su arquitectura, leyendo su estado real desde la memoria
+
+## 🧠 Consciencia funcional N0-N4
+
+| Nivel | Qué es | Estado |
+|-------|--------|--------|
+| **N0** | Reconocimiento híbrido (regex + ML), 52 intenciones bilingües | ✅ |
+| **N1** | Memoria episódica: recall de conversaciones entre sesiones | ✅ |
+| **N2** | Memoria semántica: hechos del usuario (nombre, preferencias) | ✅ |
+| **N3** | Contexto a corto plazo: elipsis/pronombres del turno anterior | ✅ |
+| **N4** | Autoconciencia funcional: introspección + auto-evaluación | ✅ |
+
+Puedes preguntarle: *"¿por qué me respondiste eso?"*, *"¿cuál es tu estado?"*,
+*"¿qué no sabes hacer?"* o *"¿cómo funcionas?"* — responde con datos reales
+(última decisión, snapshot del sistema, catálogo de intenciones pendientes).
+
+## ✅ Estado actual (Semana 7)
+
+- **388 tests verdes** · 5 agentes reales · consciencia N0-N4 completa
+- Proyecto al **64%** · lista para ejecutar en modo texto (voz opcional)
 
 ## 📦 Instalación
 
@@ -115,10 +144,10 @@ pipwin install pyaudio
 
 ## 🚀 Próximas mejoras
 
+- [ ] Cerrar las ~22 intenciones del catálogo aún "en desarrollo"
 - [ ] Integración con WhatsApp
-- [ ] Control de correo electrónico
-- [ ] Automatización de tareas
-- [ ] Base de datos de respuestas
+- [ ] Automatización de tareas (multi-acción)
+- [ ] Control de voz continuo + wake word
 - [ ] Interfaz gráfica
 
 ## 👨‍💻 Autor

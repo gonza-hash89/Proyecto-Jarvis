@@ -1,6 +1,6 @@
 # 📊 REPORTE DE PROGRESO - PROYECTO JARVIS
 
-**Generado:** 2026-08-08 · **Semana:** 5 (Agentes Esenciales) · **Estado:** ✅ SEMANA 5 COMPLETADA
+**Generado:** 2026-08-12 · **Semana:** 7 (Consciencia N3/N4) · **Estado:** ✅ SEMANA 7 COMPLETADA
 
 ## 🎯 Estado General
 
@@ -11,8 +11,9 @@
 | **SEMANA 3** (Integración) | ✅ COMPLETADO | 100% |
 | **SEMANA 4** (Intent Recognizer Híbrido) | ✅ COMPLETADO | 100% |
 | **SEMANA 5** (Agentes Esenciales) | ✅ COMPLETADO | 100% |
-| **SEMANA 6** (Refinamiento) | 📅 PENDIENTE | 0% |
-| **Proyecto General** | ⏳ EN PROGRESO | 47% |
+| **SEMANA 6** (Refinamiento y Memoria) | ✅ COMPLETADO | 100% |
+| **SEMANA 7** (Consciencia N3/N4) | ✅ COMPLETADO | 100% |
+| **Proyecto General** | ⏳ EN PROGRESO | 64% |
 
 ## 📈 Gráfico de Progreso
 
@@ -22,9 +23,83 @@ Semana 2 (Cerebro):   ███████████████████�
 Semana 3 (Integración): ████████████████████ 100% ✅
 Semana 4 (Intent):    ████████████████████ 100% ✅
 Semana 5 (Agentes):   ████████████████████ 100% ✅
-Semana 6 (Refinamiento):░░░░░░░░░░░░░░░░░░░░   0% 📅
+Semana 6 (Memoria):   ████████████████████ 100% ✅
+Semana 7 (Consciencia):████████████████████ 100% ✅
 ──────────────────────────────────────────────────
-Total Proyecto:        █████████░░░░░░░░░░░  47% ⏳
+Total Proyecto:        █████████████░░░░░░░  64% ⏳
+```
+
+## 🧠 CONSCIENCIA FUNCIONAL N0-N4 COMPLETA
+
+```
+N0  Reconocimiento (S4): intent recognizer híbrido regex + ML, 52 intenciones
+N1  Memoria episódica (S6): recall de conversaciones entre sesiones (SQLite)
+N2  Memoria semántica (S6): hechos del usuario (nombre, preferencias, entidades)
+N3  Contexto a corto plazo (S7): elipsis/pronombres heredados del turno anterior
+N4  Autoconciencia funcional (S7): introspección sobre datos reales (por qué
+    respondiste, estado, límites, arquitectura) + auto-evaluación post-respuesta
+```
+
+Declaración de honestidad: la "autoconciencia" aquí es introspección funcional
+sobre datos reales (historial de decisiones, catálogo, memoria), no vivencia
+subjetiva. Todo es observable y testeable.
+
+## ✅ LO QUE SE COMPLETÓ EN SEMANA 7 (Consciencia N3/N4)
+
+### N3 — Contexto a corto plazo (`brain/shortterm_context.py`)
+```
+✅ ShortTermContext: guarda el último turno (intent + parámetros + raw_text)
+✅ Resolución de elipsis/pronombres: "¿y pasado mañana?" hereda location de "clima de Lima"
+✅ Herencia de entidades en ContextAwareStrategy (brain/decision.py)
+✅ _resolve_with_context / _update_short_term_context / _clarify_or_default en el orquestador
+✅ Sin contexto previo → pide aclaración honesta ("¿A qué te refieres...?")
+```
+
+### N4 — Autoconciencia funcional (introspección + auto-evaluación)
+```
+✅ Preguntas de introspección en DialogAgent:
+   • "¿por qué me respondiste eso?" → narra la última decisión real del motor
+   • "¿cuál es tu estado?" → snapshot real (nombre, estado, módulos, agentes)
+   • "¿qué no sabes hacer?" → lista real de intenciones en desarrollo (pendientes)
+   • "¿cómo funcionas?" → arquitectura real en capas (reconocimiento→decisión→ejecución)
+✅ Orquestador expone en memoria: last_decision, system_status, capabilities
+✅ Auto-evaluación post-respuesta: marca respuestas débiles ("en desarrollo") sin alterarlas
+✅ _WEAK_MARKERS + evaluation adjunta en cada respuesta (metadata honesta)
+```
+
+### Tests y Cierre (verificación)
+```
+✅ +59 tests (21 N3 + 38 N4): test_shortterm_context, test_conciencia_n3_n4,
+   test_orchestrator_connectivity
+✅ Suite total: 388 tests VERDES (227 S5 + 102 S6 + 59 S7)
+✅ Trabajo verificado con pytest: 388 passed
+```
+
+## ✅ LO QUE SE COMPLETÓ EN SEMANA 6 (Refinamiento y Memoria)
+
+### Fase 1 — File Agent (`agents/file_agent.py`) +31 tests
+```
+✅ Notas (data/notas.md), tareas (data/tareas.txt), recordatorios, leer/listar archivos
+✅ Degradación elegante: sin librerías externas, solo stdlib
+```
+
+### Fase 2 — Voice Agent mejorado (`agents/voice_agent.py`) +23 tests
+```
+✅ edge-tts es-ES-AlvaroNeural (voz neural) con fallback pyttsx3 (SAPI)
+✅ Calibración de ruido + control de volumen por módulo
+```
+
+### Fase 3 — Email + Calendar (`agents/email.py`, `agents/calendar.py`) +24 tests
+```
+✅ EmailAgent vía IMAP (degradación elegante sin credenciales)
+✅ CalendarAgent vía Google Calendar API (mockeable en tests)
+```
+
+### Fase 4 — Memoria episódica (N1) + semántica (N2) +24 tests
+```
+✅ N1: recall de conversaciones entre sesiones (SQLite), resumen para contexto
+✅ N2: hechos del usuario (nombre, preferencias, entidades) con save_fact
+✅ Memoria de corto plazo (RAM) + largo plazo (SQLite) coordinados por MemoryManager
 ```
 
 ## ✅ LO QUE SE COMPLETÓ EN SEMANA 5 (Agentes Esenciales)
@@ -338,16 +413,16 @@ jarvis/
 - Toma decisiones mejores con información previa
 - Base para futuro machine learning
 
-## 🚀 Próximos Pasos (SEMANA 6: Refinamiento y Nuevos Agentes)
+## 🚀 Próximos Pasos (SEMANA 8+)
 
 ```
-SEMANA 6: Refinamiento
-├── Cerrar 24 intenciones pendientes del catálogo (ahora "en desarrollo")
+SEMANA 8+:
+├── Cerrar las ~22 intenciones pendientes del catálogo (hoy "en desarrollo")
 │   ├── Hogar: lights_on/off, adjust_temperature, lock/unlock_door, curtains, security
 │   ├── Finanzas: check_balance, transfer_money, pay_bills, budget_report
 │   ├── Salud: fitness_tracking, sleep_tracking, water_reminder, meditation, health_stats
-│   └── Productividad: calendar_event, send_email, call_contact, reminder_set, record_video
-├── FILE Agent (movido de S5) y CREATIVE Agent
+│   └── Productividad: send_email, call_contact, record_video
+├── Integración de Email/Calendar en el flujo del orquestador
 ├── Control de voz continuo + wake word
 └── Consolidar eventos (events.py) y errores (errors.py)
 ```
@@ -381,19 +456,31 @@ Documentación:
 
 ## 🎯 Métricas
 
-| Métrica | Semana 4 | Semana 5 |
-|---------|----------|----------|
-| Archivos nuevos | 3 | 6 (base, registry, factory, system, web, dialog) |
-| Líneas de código agentes | 0 | 1,330+ |
-| Tests totales | 76 | 227 |
-| Cobertura jarvis/agents | 0% | 97% (system 99%, dialog 98%, web 92%) |
-| Intenciones reales | 23 acciones | 33 (18 agentes + 23 directas − 8 compartidas) |
-| Intenciones pendientes | - | 24 (catálogo S6+) |
-| Agents vivos en runtime | 0 | 3 |
+| Métrica | Semana 4 | Semana 5 | Semana 6 | Semana 7 |
+|---------|----------|----------|----------|----------|
+| Archivos nuevos | 3 | 6 (base, registry, factory, system, web, dialog) | 4 (file, voice, email, calendar) | 2 (shortterm_context, +tests) |
+| Líneas de código agentes | 0 | 1,330+ | +700 | +250 |
+| Tests totales | 76 | 227 | 329 | 388 |
+| Cobertura jarvis/agents | 0% | 97% (system 99%, dialog 98%, web 92%) | - | - |
+| Intenciones reales | 23 acciones | 33 (18 agentes + 23 directas − 8 compartidas) | +5 | +0 |
+| Intenciones pendientes | - | 24 (catálogo S6+) | 24 (File/Email/Calendar integran) | 22 (resto del catálogo) |
+| Agents vivos en runtime | 0 | 3 | 5 (system, web, dialog, file, email/calendar) | 5 |
+| Consciencia funcional | N0 | N0 | N1 + N2 | N3 + N4 |
 
 ## 💾 Commit History
 
 ```
+SEMANA 7 (Consciencia N3/N4):
+1. ✅ a122612 - 🧠 Fase 5 (N3): ShortTermContext + resolución de elipsis + 21 tests
+2. ✅ 16eac31 - 🧠 Fase 5 (N4): Autoconciencia funcional — introspección +
+   auto-evaluación + exposición de decisión/capacidades/estado en memoria + 38 tests
+
+SEMANA 6 (Refinamiento y Memoria):
+1. ✅ 5bb30ba - 📁 Fase 1: File Agent (notas, tareas, recordatorios, archivos) + 31 tests
+2. ✅ 7ab6dc7 - 🎙️ Fase 2: Voice Agent mejorado (edge-tts AlvaroNeural) + 23 tests
+3. ✅ a1f71be - 📅 Fase 3: EmailAgent (IMAP) + CalendarAgent (Google Calendar) + 24 tests
+4. ✅ f92a953 - 🧠 Fase 4: Memoria episódica (N1) + semántica (N2) + 24 tests
+
 SEMANA 5 (Agentes Esenciales):
 1. ✅ fe98e1d - 🤖 Fase 0: Framework de agentes (base, registry, factory)
 2. ✅ cea421e - 🖥️ Fase 1: System Agent
@@ -413,7 +500,25 @@ SEMANA 4 (Intent Recognizer Híbrido):
 
 ## 🌟 Highlights
 
-### Lo Mejor de Esta Semana
+### Lo Mejor de Semana 7 (Consciencia N3/N4)
+1. **Consciencia funcional N0-N4 completa**: del reconocimiento (N0) a la
+   introspección honesta (N4) — Jarvis puede explicar POR QUÉ respondió algo
+   usando la decisión real almacenada en memoria
+2. **Elipsis con contexto**: "¿y pasado mañana?" hereda la entidad del turno
+   anterior sin repetir el comando completo
+3. **Auto-evaluación post-respuesta**: cada respuesta lleva metadata de calidad
+   (`evaluation.weak`), detectando respuestas "en desarrollo" para mejoras futuras
+4. **Límites transparentes**: "¿qué no sabes hacer?" responde con la lista real
+   de intenciones pendientes del catálogo, no con texto fijo
+5. **388 tests verdes** (+59 en la semana), todo observable y testeable
+
+### Lo Mejor de Semana 6 (Refinamiento y Memoria)
+1. **Memoria episódica (N1)** y **semántica (N2)**: Jarvis recuerda conversaciones
+   entre sesiones y hechos del usuario (nombre, preferencias)
+2. **5 agentes reales**: system, web, dialog, file y email/calendar
+3. **Voz neural**: edge-tts es-ES-AlvaroNeural con fallback offline
+
+### Lo Mejor de Esta Semana (Semana 5)
 1. **3 agentes reales**: cada uno responde con datos/acciones reales (Open-Meteo,
    CoinGecko, PowerShell, pycaw opcional) y degrada elegante sin crashear
 2. **Delegación real en el orquestador**: `_execute_intent` → AgentRegistry → agente
@@ -432,30 +537,31 @@ SEMANA 4 (Intent Recognizer Híbrido):
 
 ```
 ✅ Código: EXCELENTE CALIDAD
-✅ Tests: 227 PASANDO + COBERTURA 97% EN AGENTES
+✅ Tests: 388 PASANDO + COBERTURA 97% EN AGENTES (S5)
 ✅ Documentación: EXHAUSTIVA
+✅ Consciencia funcional: N0-N4 COMPLETA (reconocimiento → memoria → contexto → introspección)
 ✅ Listo para producción: SÍ (modo texto; voz opcional)
-✅ Listo para SEMANA 6: SÍ
+✅ Listo para SEMANA 8: SÍ
 ```
 
 ## 🎉 Conclusión
 
-**SEMANA 5 COMPLETADA EXITOSAMENTE** 🚀
+**SEMANA 7 COMPLETADA EXITOSAMENTE** 🚀
 
-Jarvis pasó de **reconocer** intenciones a **ejecutarlas con agentes reales**:
+Jarvis ya no solo **ejecuta** intenciones (S5/S6), ahora puede **explicarse a sí mismo**:
 
-- 🖥️ **System Agent** controla el equipo (apagar, apps, carpetas, captura, volumen)
-- 🌐 **Web Agent** consulta APIs reales sin keys (clima, cripto, noticias, búsqueda)
-- 💬 **Dialog Agent** conversa, cuenta chistes, cambia su nombre y traduce
-- 🔗 **Orquestador** delega en ellos y degrada elegante ante cualquier fallo
+- 🧠 **N3 Contexto**: entiende referencias al turno anterior (elipsis/pronombres)
+- 🪞 **N4 Autoconciencia**: responde honestamente qué hace, qué no sabe y cómo funciona,
+  leyendo su estado real desde la memoria
+- 📊 **388 tests verdes** respaldan la declaración de honestidad: nada es magia, todo es observable
 
-**El flujo completo ya funciona:** memoria → intención (híbrido) → decisión → agente → acción → respuesta.
+**El flujo completo ya funciona:** memoria → intención (híbrido) → decisión (con contexto) → agente → acción → respuesta con auto-evaluación.
 
-La fase de pensamiento y decisión (S2) ahora tiene **manos** (agentes, S5).
+La consciencia funcional de Jarvis está **completa de N0 a N4**. 🎯
 
 ---
 
-**Generado:** 2026-08-08  
+**Generado:** 2026-08-12  
 **Por:** Gonzalo Pariona (gonza-hash89)  
 **Proyecto:** JARVIS - Asistente Personal AGI  
 **Versión:** 3.0.0
