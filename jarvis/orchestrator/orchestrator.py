@@ -41,6 +41,7 @@ from brain.intent_processor import IntentProcessor, get_processor
 from brain.intent_data import INTENT_CATALOG
 from brain.memory import MemoryManager
 from brain.shortterm_context import ShortTermContext
+from brain.planner import TaskPlanner
 from brain.decision import (
     AgentType,
     DecisionEngine,
@@ -260,6 +261,12 @@ class Orchestrator:
         self.agent_registry: Optional[AgentRegistry] = None
         self.agent_factory: Optional[AgentFactory] = None
 
+        # Planificador multi-paso (SEMANA 8, FASE 1)
+        self.planner: Optional[TaskPlanner] = None
+        self._plan_step_results: Dict[int, Dict[str, Any]] = {}
+        self._plan_pending: Optional[list] = None
+        self._current_goal_text: str = ""
+
         # WebSocket server para esfera visual
         self.ws_server: Optional[WebSocketServer] = None
         self._ws_thread: Optional[threading.Thread] = None
@@ -368,6 +375,12 @@ class Orchestrator:
         # 5b. Contexto inmediato de turno (CONCIENCIA N3)
         self.short_term_context = ShortTermContext(max_history=5)
         self.logger.info("ShortTermContext inicializado")
+
+        # 5c. Planificador multi-paso (SEMANA 8, FASE 1)
+        self.planner = TaskPlanner(
+            executor=self._execute_planner_step, logger=self.logger
+        )
+        self.logger.info("TaskPlanner inicializado")
 
         # 6. Agentes (Semana 5): registry + factory + event_bus
         self._init_agents()
@@ -735,6 +748,19 @@ class Orchestrator:
         self.logger.info(f"Procesando input: {user_input}")
         self._publish(JarvisEvent.USER_INPUT_RECEIVED, {"input": user_input})
         self.set_state(JarvisState.THINKING)
+
+        # 1a. Metas multi-paso (SEMANA 8, FASE 1): si el usuario pide
+        #     organizar/planificar, delegamos al TaskPlanner y salimos.
+        plan_response = self._maybe_run_plan(user_input)
+        if plan_response is not None:
+            self._store_last_decision(user_input, None, None)
+            self._publish(JarvisEvent.USER_INPUT_PROCESSED, {
+                "input": user_input,
+                "intent": "plan",
+                "response": plan_response,
+            })
+            self.set_state(JarvisState.IDLE)
+            return plan_response
 
         # 1. Guardar en memoria de contexto
         self._run_async(self.memory.set_context("last_input", user_input))
@@ -1238,6 +1264,211 @@ class Orchestrator:
         if isinstance(data, dict):
             return (data.get("result") or data.get("error") or "") or None
         return str(data or "") or None
+
+    # ==================== PLANIFICACIÓN MULTI-PASO (S8 F1) ====================
+
+    def _maybe_run_plan(self, user_input: str) -> Optional[str]:
+        """Detecta metas multi-paso y las ejecuta con el TaskPlanner.
+
+        Returns:
+            La respuesta hablable si era una meta de plan; None si no aplica
+            (el flujo normal de intención sigue).
+        """
+        planner = getattr(self, "planner", None)
+        if planner is None:
+            return None
+        subtasks = planner.decompose(user_input)
+        if not subtasks:
+            return None
+
+        self._current_goal_text = user_input
+        self._plan_step_results = {}
+        self._plan_pending = None
+        self._publish("plan_started", {
+            "goal": user_input, "steps": len(subtasks),
+        })
+        result = planner.execute_plan(subtasks)
+
+        if result.get("status") == "failed":
+            text = "El plan no pudo completarse del todo.\n" + result.get(
+                "report", "Sin reporte."
+            )
+            self._publish("plan_failed", {
+                "goal": user_input, "report": result.get("report"),
+            })
+            self.speak(text)
+            return text
+
+        results = result.get("results") or {}
+        final_text = None
+        if results:
+            last = results.get(max(results.keys())) or {}
+            if isinstance(last, dict):
+                data = last.get("data")
+                if isinstance(data, dict):
+                    final_text = data.get("result")
+                final_text = final_text or last.get("result")
+        text = final_text or result.get("report", "")
+        self._publish("plan_finished", {
+            "goal": user_input, "status": result.get("status"),
+        })
+        self.speak(text)
+        return text
+
+    def _execute_planner_step(self, step: Dict[str, Any]) -> Dict[str, Any]:
+        """Executor de pasos del plan: delega en agentes o resuelve en local."""
+        agent_name = step.get("agent", "")
+        intent = step.get("intent", "")
+        params = step.get("params") or {}
+
+        # Pasos de razonamiento local (no requieren agentes de datos).
+        # "memory" es la alternativa de recuperación de notas (planner.py).
+        if agent_name in ("planner", "memory"):
+            handler = {
+                "prioritize": self._planner_prioritize,
+                "summary": self._planner_summary,
+                "recent_conversations": self._planner_recent_conversations,
+            }.get(intent)
+            if handler is None:
+                return {
+                    "result": f"Paso de plan '{intent}' no soportado",
+                    "status": "error",
+                }
+            outcome = handler()
+        else:
+            agent = self._planner_agent(agent_name)
+            if agent is None:
+                return {
+                    "result": f"Agente '{agent_name}' no disponible",
+                    "status": "error",
+                }
+            try:
+                outcome = agent.process({
+                    "intent": intent,
+                    "entities": params,
+                    "parameters": params,
+                    "text": self._current_goal_text or "",
+                    "user_input": self._current_goal_text or "",
+                })
+            except Exception as e:
+                self.logger.warning(
+                    f"Paso de plan '{intent}' falló en {agent_name}: {e}"
+                )
+                return {"result": str(e), "status": "error"}
+            if not isinstance(outcome, dict):
+                outcome = {"result": str(outcome or "")}
+
+        self._plan_step_results[step.get("id")] = outcome
+        self._publish("plan_step_completed", {
+            "step_id": step.get("id"),
+            "intent": intent,
+            "status": outcome.get("status"),
+        })
+        return outcome
+
+    def _planner_agent(self, agent_name: str) -> Optional[Any]:
+        """Resuelve un agente de datos por nombre para el plan.
+
+        Si no está registrado (arranque mínimo de Semana 5), lo crea bajo
+        demanda con la AgentFactory y lo deja registrado para la sesión.
+        """
+        registry = getattr(self, "agent_registry", None)
+        candidate = None
+        if registry is not None:
+            candidate = registry.get(agent_name)
+        if candidate is not None:
+            return candidate
+
+        mapping = {
+            "file_agent": AgentType.FILE,
+            "calendar_agent": AgentType.CALENDAR,
+        }
+        atype = mapping.get(agent_name)
+        factory = getattr(self, "agent_factory", None)
+        if atype is None or factory is None:
+            return None
+        try:
+            db_path = os.path.join(
+                self.config.base_dir, self.config.data_dir, "jarvis_memory.db"
+            )
+            agent = factory.create(atype, config={"db_path": db_path})
+            if agent is None:
+                return None
+            agent.event_bus = getattr(self, "event_bus", None)
+            if registry is not None:
+                registry.register(agent)
+            return agent
+        except Exception as e:
+            self.logger.warning(f"No se pudo crear agente '{agent_name}': {e}")
+            return None
+
+    def _planner_prioritize(self) -> Dict[str, Any]:
+        """Prioriza las tareas pendientes obtenidas en el paso anterior."""
+        tasks = []
+        first = self._plan_step_results.get(1) or {}
+        if isinstance(first, dict):
+            data = first.get("data") or {}
+            if isinstance(data, dict):
+                tasks = data.get("tasks") or []
+        pending = [
+            t for t in tasks
+            if t.get("metadata", {}).get("status") != "completada"
+        ]
+        self._plan_pending = pending
+        if not pending:
+            return {"result": "No hay tareas pendientes para priorizar.",
+                    "status": "success", "count": 0}
+        return {
+            "result": f"{len(pending)} tareas pendientes priorizadas.",
+            "status": "success", "count": len(pending),
+        }
+
+    def _planner_summary(self) -> Dict[str, Any]:
+        """Arma el resumen final del plan (tareas + eventos)."""
+        lines = ["Te preparé el resumen:"]
+        pending = getattr(self, "_plan_pending", None) or []
+        if pending:
+            word = "tarea pendiente" if len(pending) == 1 else "tareas pendientes"
+            lines.append(f"- {len(pending)} {word}:")
+            for t in pending[:5]:
+                lines.append(f"  * {t['value'].get('description', '')}")
+        else:
+            lines.append("- No tienes tareas pendientes.")
+
+        events = self._plan_step_results.get(2) or {}
+        if isinstance(events, dict):
+            data = events.get("data") or {}
+            if isinstance(data, dict):
+                result = data.get("result")
+                if result and "event" in result.lower():
+                    lines.append("- Agenda:")
+                    lines.append(f"  {result}")
+        text = "\n".join(lines)
+        return {"result": text, "status": "success"}
+
+    def _planner_recent_conversations(self) -> Dict[str, Any]:
+        """Alternativa cuando las tareas no se pueden leer: últimas notas."""
+        notes = []
+        try:
+            db_path = os.path.join(
+                self.config.base_dir, self.config.data_dir, "jarvis_memory.db"
+            )
+            from brain.memory import LongTermMemory
+            store = LongTermMemory(db_path)
+            for row in store._search_memories_sync("", limit=500) or []:
+                metadata = row.get("metadata") or {}
+                value = row.get("value") or {}
+                if metadata.get("type") == "note" and value.get("content"):
+                    notes.append(value["content"])
+        except Exception as e:
+            self.logger.warning(f"No se pudo recuperar notas recientes: {e}")
+        if not notes:
+            return {"result": "No pude recuperar tus notas recientes.",
+                    "status": "success", "count": 0}
+        lines = ["Recuperé tus últimas notas:"]
+        for note in notes[-3:]:
+            lines.append(f"- {note}")
+        return {"result": "\n".join(lines), "status": "success", "count": len(notes)}
 
     # ==================== ACCIONES (11) ====================
 
