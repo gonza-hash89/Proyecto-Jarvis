@@ -43,6 +43,7 @@ from brain.memory import MemoryManager
 from brain.shortterm_context import ShortTermContext
 from brain.planner import TaskPlanner
 from brain.proactive import ProactiveEngine
+from brain.agent_coordinator import AgentCoordinator
 from brain.decision import (
     AgentType,
     DecisionEngine,
@@ -271,6 +272,9 @@ class Orchestrator:
         # Motor proactivo (SEMANA 8, FASE 2)
         self.proactive_engine: Optional[ProactiveEngine] = None
 
+        # Coordinador de agentes (SEMANA 8, FASE 3)
+        self.coordinator: Optional[AgentCoordinator] = None
+
         # WebSocket server para esfera visual
         self.ws_server: Optional[WebSocketServer] = None
         self._ws_thread: Optional[threading.Thread] = None
@@ -403,6 +407,31 @@ class Orchestrator:
 
         # 6. Agentes (Semana 5): registry + factory + event_bus
         self._init_agents()
+
+        # 6b. Coordinador de agentes (SEMANA 8, FASE 3): observa el bus,
+        #     deriva eventos de dominio y ejecuta pipelines multi-agente.
+        self.coordinator = AgentCoordinator(
+            registry=self.agent_registry,
+            event_bus=self.event_bus,
+            memory=self.memory,
+            logger=self.logger,
+        )
+        self.coordinator.register_pipeline(
+            "on_weather_query",
+            [
+                {"agent": "memory", "operation": "set_context",
+                 "params": {"key": "event_weather_logged", "value": "clima consultado"}},
+            ],
+        )
+        self.coordinator.register_pipeline(
+            "on_create_task",
+            [
+                {"agent": "memory", "operation": "set_context",
+                 "params": {"key": "event_task_logged", "value": "tarea creada"}},
+            ],
+        )
+        self.coordinator.subscribe_events()
+        self.logger.info("AgentCoordinator inicializado")
 
         self.modules_ready = True
 
