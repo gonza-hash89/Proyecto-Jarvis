@@ -42,6 +42,7 @@ from brain.intent_data import INTENT_CATALOG
 from brain.memory import MemoryManager
 from brain.shortterm_context import ShortTermContext
 from brain.planner import TaskPlanner
+from brain.proactive import ProactiveEngine
 from brain.decision import (
     AgentType,
     DecisionEngine,
@@ -267,6 +268,9 @@ class Orchestrator:
         self._plan_pending: Optional[list] = None
         self._current_goal_text: str = ""
 
+        # Motor proactivo (SEMANA 8, FASE 2)
+        self.proactive_engine: Optional[ProactiveEngine] = None
+
         # WebSocket server para esfera visual
         self.ws_server: Optional[WebSocketServer] = None
         self._ws_thread: Optional[threading.Thread] = None
@@ -381,6 +385,21 @@ class Orchestrator:
             executor=self._execute_planner_step, logger=self.logger
         )
         self.logger.info("TaskPlanner inicializado")
+
+        # 5d. Motor proactivo (SEMANA 8, FASE 2): recordatorios, patrones, cripto.
+        db_path = os.path.join(
+            self.config.base_dir, self.config.data_dir, "jarvis_memory.db"
+        )
+        self.proactive_engine = ProactiveEngine(
+            config=self.config,
+            logger=self.logger,
+            event_bus=self.event_bus,
+            db_path=db_path,
+        )
+        self.proactive_engine.on_reminder = self._proactive_on_reminder
+        self.proactive_engine.on_pattern = self._proactive_on_pattern
+        self.proactive_engine.on_crypto = self._proactive_on_crypto
+        self.logger.info("ProactiveEngine inicializado")
 
         # 6. Agentes (Semana 5): registry + factory + event_bus
         self._init_agents()
@@ -513,6 +532,10 @@ class Orchestrator:
 
         self._wishme()
 
+        # SEMANA 8 FASE 2: motor proactivo en segundo plano (daemon).
+        if getattr(self, "proactive_engine", None) is not None:
+            self.proactive_engine.start()
+
         while self.is_running:
             try:
                 query = self._listen()
@@ -542,6 +565,9 @@ class Orchestrator:
 
     def shutdown(self) -> None:
         """Apaga Jarvis de forma ordenada, cerrando sesión y bus."""
+        # SEMANA 8 FASE 2: detener el motor proactivo antes de apagar el bus.
+        if getattr(self, "proactive_engine", None) is not None:
+            self.proactive_engine.stop()
         self._publish(
             JarvisEvent.SESSION_ENDED,
             {"session": self.decision_context.session_id},
@@ -1264,6 +1290,32 @@ class Orchestrator:
         if isinstance(data, dict):
             return (data.get("result") or data.get("error") or "") or None
         return str(data or "") or None
+
+    # ==================== MOTOR PROACTIVO (S8 F2) ====================
+
+    def _proactive_on_reminder(self, text: str) -> None:
+        """El motor proactivo avisa un recordatorio vencido (hilo daemon)."""
+        self.logger.info(f"Recordatorio proactivo: {text}")
+        try:
+            self.speak(text)
+        except Exception as e:
+            self.logger.warning(f"No se pudo hablar el recordatorio: {e}")
+
+    def _proactive_on_pattern(self, text: str) -> None:
+        """El motor proactivo reporta un hábito detectado."""
+        self.logger.info(f"Patrón detectado: {text}")
+        try:
+            self.speak(text)
+        except Exception as e:
+            self.logger.warning(f"No se pudo hablar el patrón: {e}")
+
+    def _proactive_on_crypto(self, text: str) -> None:
+        """El motor proactivo reporta un movimiento de criptomonedas."""
+        self.logger.info(f"Movimiento cripto: {text}")
+        try:
+            self.speak(text)
+        except Exception as e:
+            self.logger.warning(f"No se pudo hablar el movimiento cripto: {e}")
 
     # ==================== PLANIFICACIÓN MULTI-PASO (S8 F1) ====================
 
