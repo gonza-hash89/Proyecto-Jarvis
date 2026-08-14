@@ -6,623 +6,211 @@
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #000; overflow: hidden; font-family: 'Segoe UI', system-ui, sans-serif; }
-    canvas { display: block; }
-    #title {
-      position: absolute;
-      top: 30px;
-      left: 50%;
-      transform: translateX(-50%);
-      color: #00aaff;
-      font-size: 28px;
-      letter-spacing: 8px;
-      font-weight: 300;
-      text-shadow: 0 0 20px rgba(0, 170, 255, 0.6), 0 0 40px rgba(0, 170, 255, 0.3);
-      opacity: 0.9;
-      user-select: none;
-      pointer-events: none;
+    canvas { display: block; width: 100% !important; height: 100% !important; }
+    #titulo { 
+      position: absolute; 
+      top: 18px; 
+      left: 50%; 
+      transform: translateX(-50%); 
+      color: rgba(100,200,255,0.4); 
+      font-family: monospace; 
+      font-size: 11px; 
+      letter-spacing: 6px; 
+      pointer-events: none; 
     }
-    #status {
-      position: absolute;
-      bottom: 30px;
-      left: 50%;
-      transform: translateX(-50%);
-      color: rgba(255, 255, 255, 0.5);
-      font-size: 13px;
-      letter-spacing: 3px;
-      font-weight: 300;
-      text-transform: uppercase;
-      user-select: none;
-      pointer-events: none;
-      transition: color 0.3s, opacity 0.3s;
+    #estado { 
+      position: absolute; 
+      bottom: 18px; 
+      left: 50%; 
+      transform: translateX(-50%); 
+      color: rgba(100,200,255,0.45); 
+      font-family: monospace; 
+      font-size: 11px; 
+      letter-spacing: 4px; 
+      pointer-events: none; 
     }
-    #connection {
-      position: absolute;
-      top: 70px;
-      left: 50%;
-      transform: translateX(-50%);
-      color: rgba(255, 255, 255, 0.3);
-      font-size: 11px;
-      letter-spacing: 2px;
-      user-select: none;
-      pointer-events: none;
+    #ws-status { 
+      position: absolute; 
+      top: 18px; 
+      right: 18px; 
+      font-family: monospace; 
+      font-size: 10px; 
+      letter-spacing: 2px; 
+      color: rgba(255,80,80,0.6); 
+    }
+    #ws-status.ok { color: rgba(80,255,150,0.6); }
+    #btns { 
+      position: absolute; 
+      bottom: 42px; 
+      left: 50%; 
+      transform: translateX(-50%); 
+      display: flex; 
+      gap: 6px; 
+    }
+    button { 
+      padding: 5px 12px; 
+      border-radius: 16px; 
+      border: 1px solid rgba(100,200,255,0.2); 
+      background: rgba(100,200,255,0.05); 
+      color: rgba(100,200,255,0.6); 
+      cursor: pointer; 
+      font-size: 10px; 
+      font-family: monospace; 
+      letter-spacing: 1px; 
+      transition: all 0.2s; 
+    }
+    button:hover, button.on { 
+      background: rgba(100,200,255,0.15); 
+      border-color: rgba(100,200,255,0.5); 
+      color: rgba(100,200,255,0.9); 
     }
   </style>
 </head>
 <body>
-  <div id="title">J·A·R·V·I·S</div>
-  <div id="connection">Conectando...</div>
-  <div id="status">IDLE</div>
+  <div id="titulo">J · A · R · V · I · S</div>
+  <canvas id="c"></canvas>
+  <div id="ws-status">DESCONECTADO</div>
+  <div id="btns">
+    <button class="on" onclick="setState('idle',this)">Idle</button>
+    <button onclick="setState('escuchando',this)">Escuchar</button>
+    <button onclick="setState('procesando',this)">Procesar</button>
+    <button onclick="setState('hablando',this)">Hablar</button>
+  </div>
+  <div id="estado">IDLE</div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script>
-/* ════════════════════════════════════════════════════════════════════
-   SIMPLEX NOISE 3D (port compacto, sin dependencias)
-   ═══════════════════════════════════════════════════════════════════ */
-const SimplexNoise = (function() {
-  const F3 = 1/3, G3 = 1/6;
-  const grad3 = new Float32Array([
-    1,1,0, -1,1,0, 1,-1,0, -1,-1,0,
-    1,0,1, -1,0,1, 1,0,-1, -1,0,-1,
-    0,1,1, 0,-1,1, 0,1,-1, 0,-1,-1
-  ]);
-  const p = new Uint8Array(512);
-  const perm = new Uint8Array(256);
-  for (let i = 0; i < 256; i++) perm[i] = i;
-  for (let i = 255; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [perm[i], perm[j]] = [perm[j], perm[i]];
-  }
-  for (let i = 0; i < 512; i++) p[i] = perm[i & 255];
-  function dot(g, x, y, z) { return g[0]*x + g[1]*y + g[2]*z; }
-  return function noise3D(xin, yin, zin) {
-    let s = (xin + yin + zin) * F3;
-    let i = Math.floor(xin + s), j = Math.floor(yin + s), k = Math.floor(zin + s);
-    let t = (i + j + k) * G3;
-    let X0 = i - t, Y0 = j - t, Z0 = k - t;
-    let x0 = xin - X0, y0 = yin - Y0, z0 = zin - Z0;
-    let i1, j1, k1, i2, j2, k2;
-    if (x0 >= y0) { if (y0 >= z0) { i1=1;j1=0;k1=0; i2=1;j2=1;k2=0; }
-      else if (x0 >= z0) { i1=1;j1=0;k1=0; i2=1;j2=0;k2=1; }
-      else { i1=0;j1=0;k1=1; i2=1;j2=0;k2=1; } }
-    else { if (y0 < z0) { i1=0;j1=0;k1=1; i2=0;j2=1;k2=1; }
-      else if (x0 < z0) { i1=0;j1=1;k1=0; i2=0;j2=1;k2=1; }
-      else { i1=0;j1=1;k1=0; i2=1;j2=1;k2=0; } }
-    let x1 = x0 - i1 + G3, y1 = y0 - j1 + G3, z1 = z0 - k1 + G3;
-    let x2 = x0 - i2 + 2*G3, y2 = y0 - j2 + 2*G3, z2 = z0 - k2 + 2*G3;
-    let x3 = x0 - 1 + 3*G3, y3 = y0 - 1 + 3*G3, z3 = z0 - 1 + 3*G3;
-    i &= 255; j &= 255; k &= 255;
-    let gi0 = p[i + p[j + p[k]]] % 12 * 3;
-    let gi1 = p[i + i1 + p[j + j1 + p[k + k1]]] % 12 * 3;
-    let gi2 = p[i + i2 + p[j + j2 + p[k + k2]]] % 12 * 3;
-    let gi3 = p[i + 1 + p[j + 1 + p[k + 1]]] % 12 * 3;
-    let t0 = 0.6 - x0*x0 - y0*y0 - z0*z0;
-    let n0 = t0 < 0 ? 0 : (t0*=t0, t0*t0 * dot(grad3.subarray(gi0, gi0+3), x0, y0, z0));
-    let t1 = 0.6 - x1*x1 - y1*y1 - z1*z1;
-    let n1 = t1 < 0 ? 0 : (t1*=t1, t1*t1 * dot(grad3.subarray(gi1, gi1+3), x1, y1, z1));
-    let t2 = 0.6 - x2*x2 - y2*y2 - z2*z2;
-    let n2 = t2 < 0 ? 0 : (t2*=t2, t2*t2 * dot(grad3.subarray(gi2, gi2+3), x2, y2, z2));
-    let t3 = 0.6 - x3*x3 - y3*y3 - z3*z3;
-    let n3 = t3 < 0 ? 0 : (t3*=t3, t3*t3 * dot(grad3.subarray(gi3, gi3+3), x3, y3, z3));
-    return 32 * (n0 + n1 + n2 + n3);
-  };
-})();
-
-/* ════════════════════════════════════════════════════════════════════
-   CONFIGURACIÓN DE ESTADOS - Valores reducidos para sutileza
-   ════════════════════════════════════════════════════════════════════ */
-const STATES = {
-  idle: {
-    name: 'IDLE',
-    baseColor: new THREE.Color(0x0a1628),
-    glowColor: new THREE.Color(0x004488),
-    particleColor: new THREE.Color(0x0088ff),
-    noiseSpeed: 0.0003,
-    noiseAmplitude: 0.008,
-    breathSpeed: 0.3,
-    breathAmount: 0.015,
-    particleSpeed: 0.15,
-    waveFrequency: 0,
-    waveAmplitude: 0
-  },
-  escuchando: {
-    name: 'ESCUCHANDO',
-    baseColor: new THREE.Color(0x00ff88),
-    glowColor: new THREE.Color(0x00ff88),
-    particleColor: new THREE.Color(0x00ffaa),
-    noiseSpeed: 0.001,
-    noiseAmplitude: 0.02,
-    breathSpeed: 0.8,
-    breathAmount: 0.02,
-    particleSpeed: 0.4,
-    waveFrequency: 1.5,
-    waveAmplitude: 0.015
-  },
-  procesando: {
-    name: 'PROCESANDO',
-    baseColor: new THREE.Color(0xffaa00),
-    glowColor: new THREE.Color(0xff6600),
-    particleColor: new THREE.Color(0xffcc00),
-    noiseSpeed: 0.003,
-    noiseAmplitude: 0.035,
-    breathSpeed: 2.0,
-    breathAmount: 0.025,
-    particleSpeed: 0.8,
-    waveFrequency: 3.0,
-    waveAmplitude: 0.025
-  },
-  hablando: {
-    name: 'HABLANDO',
-    baseColor: new THREE.Color(0x00aaff),
-    glowColor: new THREE.Color(0x0088ff),
-    particleColor: new THREE.Color(0x44ddff),
-    noiseSpeed: 0.002,
-    noiseAmplitude: 0.025,
-    breathSpeed: 4.0,
-    breathAmount: 0.04,
-    particleSpeed: 0.6,
-    waveFrequency: 5.0,
-    waveAmplitude: 0.04
-  }
-};
-
-const STATE_ORDER = ['idle', 'escuchando', 'procesando', 'hablando'];
-let currentState = 'idle';
-let targetState = 'idle';
-let stateTransition = 0;
-const TRANSITION_SPEED = 0.05;
-
-/* ════════════════════════════════════════════════════════════════════
-   THREE.JS SETUP - Cámara más lejos para contener la esfera
-   ════════════════════════════════════════════════════════════════════ */
-const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-renderer.setSize(window.innerWidth, window.innerHeight);
+const wrap = document.body;
+const W = window.innerWidth, H = window.innerHeight;
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('c'), antialias: true });
+renderer.setSize(W, H);
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-document.body.appendChild(renderer.domElement);
+renderer.setClearColor(0x000000);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
-camera.position.z = 5.5;
+const camera = new THREE.PerspectiveCamera(50, W/H, 0.1, 100);
+camera.position.z = 3.5;
 
 window.addEventListener('resize', () => {
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  camera.aspect = window.innerWidth / window.innerHeight;
+  const W = window.innerWidth, H = window.innerHeight;
+  renderer.setSize(W, H);
+  camera.aspect = W/H;
   camera.updateProjectionMatrix();
 });
 
-/* ════════════════════════════════════════════════════════════════════
-   ESFERA FLUIDA - Geometría + Shader con deformaciones sutiles
-   ════════════════════════════════════════════════════════════════════ */
-const SPHERE_DETAIL = 64;
-const sphereGeo = new THREE.SphereGeometry(1, SPHERE_DETAIL, SPHERE_DETAIL);
-const posAttr = sphereGeo.getAttribute('position');
-const vertexCount = posAttr.count;
-const originalPositions = new Float32Array(vertexCount * 3);
-for (let i = 0; i < vertexCount * 3; i++) originalPositions[i] = posAttr.array[i];
-
-const sphereUniforms = {
-  uTime: { value: 0 },
-  uNoiseSpeed: { value: STATES.idle.noiseSpeed },
-  uNoiseAmplitude: { value: STATES.idle.noiseAmplitude },
-  uBreathSpeed: { value: STATES.idle.breathSpeed },
-  uBreathAmount: { value: STATES.idle.breathAmount },
-  uWaveFrequency: { value: STATES.idle.waveFrequency },
-  uWaveAmplitude: { value: STATES.idle.waveAmplitude },
-  uBaseColor: { value: STATES.idle.baseColor.clone() },
-  uGlowColor: { value: STATES.idle.glowColor.clone() },
-  uStateProgress: { value: 0 }
+const STATES = {
+  idle:        { r:0.1,  g:0.45, b:1.0,  amp:0.06, speed:0.3,  pulse:0.015, label:'IDLE' },
+  escuchando:  { r:0.1,  g:0.9,  b:0.5,  amp:0.12, speed:0.6,  pulse:0.04,  label:'ESCUCHANDO' },
+  procesando:  { r:1.0,  g:0.65, b:0.0,  amp:0.22, speed:1.8,  pulse:0.1,   label:'PROCESANDO' },
+  hablando:    { r:0.15, g:0.75, b:1.0,  amp:0.18, speed:1.1,  pulse:0.08,  label:'HABLANDO' }
 };
 
-const sphereMaterial = new THREE.ShaderMaterial({
-  uniforms: sphereUniforms,
-  vertexShader: `
-    uniform float uTime;
-    uniform float uNoiseSpeed;
-    uniform float uNoiseAmplitude;
-    uniform float uBreathSpeed;
-    uniform float uBreathAmount;
-    uniform float uWaveFrequency;
-    uniform float uWaveAmplitude;
-    varying vec3 vNormal;
-    varying vec3 vWorldPos;
-    varying float vDistCenter;
-    varying float vNoise;
+let cur = {...STATES.idle}, tgt = {...STATES.idle};
 
-    // Simplex 3D noise (reconstruido en GLSL)
-    vec3 mod289(vec3 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
-    vec4 mod289(vec4 x) { return x - floor(x * (1.0 / 289.0)) * 289.0; }
-    vec4 permute(vec4 x) { return mod289(((x*34.0)+1.0)*x); }
-    vec4 taylorInvSqrt(vec4 r) { return 1.79284291400159 - 0.85373472095314 * r; }
+function lerp(a,b,f){return a+(b-a)*f;}
 
-    float snoise(vec3 v) {
-      const vec2 C = vec2(1.0/6.0, 1.0/3.0);
-      const vec4 D = vec4(0.0, 0.5, 1.0, 2.0);
-      vec3 i  = floor(v + dot(v, C.yyy));
-      vec3 x0 = v - i + dot(i, C.xxx);
-      vec3 g = step(x0.yzx, x0.xyz);
-      vec3 l = 1.0 - g;
-      vec3 i1 = min(g.xyz, l.zxy);
-      vec3 i2 = max(g.xyz, l.zxy);
-      vec3 x1 = x0 - i1 + C.xxx;
-      vec3 x2 = x0 - i2 + C.yyy;
-      vec3 x3 = x0 - D.yyy;
-      i = mod289(i);
-      vec4 p = permute(permute(permute(i.z + vec4(0.0, i1.z, i2.z, 1.0))
-        + i.y + vec4(0.0, i1.y, i2.y, 1.0))
-        + i.x + vec4(0.0, i1.x, i2.x, 1.0));
-      float n_ = 0.142857142857;
-      vec3 ns = n_ * D.wyz - D.xzx;
-      vec4 j = p - 49.0 * floor(p * ns.z * ns.z);
-      vec4 x_ = floor(j * ns.z);
-      vec4 y_ = floor(j - 7.0 * x_);
-      vec4 x = x_ * ns.x + ns.yyyy;
-      vec4 y = y_ * ns.x + ns.yyyy;
-      vec4 h = 1.0 - abs(x) - abs(y);
-      vec4 b0 = vec4(x.xy, y.xy);
-      vec4 b1 = vec4(x.zw, y.zw);
-      vec4 s0 = floor(b0)*2.0 + 1.0;
-      vec4 s1 = floor(b1)*2.0 + 1.0;
-      vec4 sh = -step(h, vec4(0.0));
-      vec4 a0 = b0.xzyw + s0.xzyw*sh.xxyy;
-      vec4 a1 = b1.xzyw + s1.xzyw*sh.zzww;
-      vec3 p0 = vec3(a0.xy, h.x);
-      vec3 p1 = vec3(a0.zw, h.y);
-      vec3 p2 = vec3(a1.xy, h.z);
-      vec3 p3 = vec3(a1.zw, h.w);
-      vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2,p2), dot(p3,p3)));
-      p0 *= norm.x; p1 *= norm.y; p2 *= norm.z; p3 *= norm.w;
-      vec4 m = max(0.6 - vec4(dot(x0,x0), dot(x1,x1), dot(x2,x2), dot(x3,x3)), 0.0);
-      m = m * m;
-      return 42.0 * dot(m*m, vec4(dot(p0,x0), dot(p1,x1), dot(p2,x2), dot(p3,x3)));
-    }
+const N = 3000;
+const geo = new THREE.BufferGeometry();
+const pos = new Float32Array(N*3);
+const base = new Float32Array(N*3);
+const phi_arr = new Float32Array(N);
+const theta_arr = new Float32Array(N);
+const ph = new Float32Array(N);
 
-    void main() {
-      vNormal = normalize(normalMatrix * normal);
-      vec3 pos = position;
-      float n = snoise(pos * 0.8 + uTime * uNoiseSpeed);
-      vNoise = n;
-      float breath = sin(uTime * uBreathSpeed) * uBreathAmount;
-      float wave = sin(uTime * uWaveFrequency + length(pos) * 20.0) * uWaveAmplitude;
-      float displacement = n * uNoiseAmplitude + breath + wave;
-      pos += normal * displacement;
-      vDistCenter = length(pos);
-      vec4 worldPos = modelMatrix * vec4(pos, 1.0);
-      vWorldPos = worldPos.xyz;
-      gl_Position = projectionMatrix * viewMatrix * worldPos;
-    }
-  `,
-  fragmentShader: `
-    uniform vec3 uBaseColor;
-    uniform vec3 uGlowColor;
-    varying vec3 vNormal;
-    varying vec3 vWorldPos;
-    varying float vDistCenter;
-    varying float vNoise;
-
-    void main() {
-      vec3 viewDir = normalize(cameraPosition - vWorldPos);
-      float fresnel = pow(1.0 - dot(vNormal, viewDir), 2.5);
-      float innerGlow = smoothstep(0.95, 1.05, vDistCenter) * 0.15;
-      vec3 color = mix(uBaseColor, uGlowColor, fresnel * 0.35 + innerGlow);
-      color += vec3(vNoise * 0.05) * uGlowColor;
-      float alpha = 0.6 + fresnel * 0.25 + innerGlow * 0.3;
-      gl_FragColor = vec4(color, alpha);
-    }
-  `,
-  transparent: true,
-  depthWrite: false
-});
-
-const sphere = new THREE.Mesh(sphereGeo, sphereMaterial);
-scene.add(sphere);
-
-/* ════════════════════════════════════════════════════════════════════
-   PARTÍCULAS ORBITANTES - Más pequeñas y sutiles
-   ════════════════════════════════════════════════════════════════════ */
-const PARTICLE_COUNT = 500;
-const particleGeo = new THREE.BufferGeometry();
-const pPositions = new Float32Array(PARTICLE_COUNT * 3);
-const pSizes = new Float32Array(PARTICLE_COUNT);
-const pPhases = new Float32Array(PARTICLE_COUNT);
-const pRadii = new Float32Array(PARTICLE_COUNT);
-const pSpeeds = new Float32Array(PARTICLE_COUNT);
-const pAxis = new Float32Array(PARTICLE_COUNT * 3);
-
-for (let i = 0; i < PARTICLE_COUNT; i++) {
-  const radius = 1.3 + Math.random() * 1.2;
-  const theta = Math.random() * Math.PI * 2;
-  const phi = Math.acos(2 * Math.random() - 1);
-  pPositions[i*3] = radius * Math.sin(phi) * Math.cos(theta);
-  pPositions[i*3+1] = radius * Math.sin(phi) * Math.sin(theta);
-  pPositions[i*3+2] = radius * Math.cos(phi);
-  pSizes[i] = 0.15 + Math.random() * 0.25;
-  pPhases[i] = Math.random() * Math.PI * 2;
-  pRadii[i] = radius;
-  pSpeeds[i] = 0.05 + Math.random() * 0.15;
-  const axis = new THREE.Vector3(
-    (Math.random() - 0.5) * 2,
-    (Math.random() - 0.5) * 2,
-    (Math.random() - 0.5) * 2
-  ).normalize();
-  pAxis[i*3] = axis.x; pAxis[i*3+1] = axis.y; pAxis[i*3+2] = axis.z;
+for(let i=0;i<N;i++){
+  phi_arr[i] = Math.acos(2*Math.random()-1);
+  theta_arr[i] = Math.random()*Math.PI*2;
+  ph[i] = Math.random()*Math.PI*2;
+  const r = 1.0;
+  base[i*3]   = r*Math.sin(phi_arr[i])*Math.cos(theta_arr[i]);
+  base[i*3+1] = r*Math.sin(phi_arr[i])*Math.sin(theta_arr[i]);
+  base[i*3+2] = r*Math.cos(phi_arr[i]);
+  pos[i*3]=base[i*3]; pos[i*3+1]=base[i*3+1]; pos[i*3+2]=base[i*3+2];
 }
 
-particleGeo.setAttribute('position', new THREE.BufferAttribute(pPositions, 3));
-particleGeo.setAttribute('size', new THREE.BufferAttribute(pSizes, 1));
-particleGeo.setAttribute('phase', new THREE.BufferAttribute(pPhases, 1));
+geo.setAttribute('position', new THREE.BufferAttribute(pos,3));
+const mat = new THREE.PointsMaterial({ size:0.018, color:0x1a90ff, transparent:true, opacity:0.85 });
+const pts = new THREE.Points(geo, mat);
+scene.add(pts);
 
-const particleUniforms = {
-  uTime: { value: 0 },
-  uParticleColor: { value: STATES.idle.particleColor.clone() },
-  uParticleSpeed: { value: STATES.idle.particleSpeed }
-};
+const glowGeo = new THREE.SphereGeometry(1.08,32,32);
+const glowMat = new THREE.MeshBasicMaterial({ color:0x1a90ff, transparent:true, opacity:0.06, side:THREE.BackSide });
+const glow = new THREE.Mesh(glowGeo, glowMat);
+scene.add(glow);
 
-const particleShaderMaterial = new THREE.ShaderMaterial({
-  uniforms: particleUniforms,
-  vertexShader: `
-    attribute float size;
-    attribute float phase;
-    uniform float uTime;
-    uniform float uParticleSpeed;
-    varying float vAlpha;
-    varying float vSize;
-    void main() {
-      vSize = size;
-      float speed = uParticleSpeed * 0.5;
-      vec3 pos = position;
-      float t = uTime * speed + phase;
-      pos.x += sin(t) * 0.03;
-      pos.y += cos(t * 0.7) * 0.03;
-      pos.z += sin(t * 1.3) * 0.03;
-      vec4 mvPos = modelViewMatrix * vec4(pos, 1.0);
-      gl_PointSize = size * (120.0 / -mvPos.z);
-      gl_Position = projectionMatrix * mvPos;
-      vAlpha = 0.2 + 0.5 * sin(t * 2.0) * 0.5 + 0.5;
-    }
-  `,
-  fragmentShader: `
-    uniform vec3 uParticleColor;
-    varying float vAlpha;
-    varying float vSize;
-    void main() {
-      float dist = length(gl_PointCoord - 0.5);
-      if (dist > 0.5) discard;
-      float alpha = (1.0 - dist * 2.0) * vAlpha;
-      gl_FragColor = vec4(uParticleColor, alpha);
-    }
-  `,
-  transparent: true,
-  depthWrite: false,
-  blending: THREE.AdditiveBlending
-});
+const coreGeo = new THREE.SphereGeometry(0.18,24,24);
+const coreMat = new THREE.MeshBasicMaterial({ color:0x40c4ff, transparent:true, opacity:0.9 });
+const core = new THREE.Mesh(coreGeo, coreMat);
+scene.add(core);
 
-const particles = new THREE.Points(particleGeo, particleShaderMaterial);
-scene.add(particles);
+let t=0, ry=0;
 
-/* ════════════════════════════════════════════════════════════════════
-   GLOW EXTERNO - Reducido al 20% (opacidad 0.03, escala 1.5)
-   ════════════════════════════════════════════════════════════════════ */
-const glowTexture = (() => {
-  const size = 256;
-  const canvas = document.createElement('canvas');
-  canvas.width = size; canvas.height = size;
-  const ctx = canvas.getContext('2d');
-  const grad = ctx.createRadialGradient(size/2, size/2, 0, size/2, size/2, size/2);
-  grad.addColorStop(0, 'rgba(255,255,255,1)');
-  grad.addColorStop(0.3, 'rgba(255,255,255,0.5)');
-  grad.addColorStop(1, 'rgba(255,255,255,0)');
-  ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, size, size);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  return tex;
-})();
-
-const glowSprite = new THREE.Sprite(new THREE.SpriteMaterial({
-  map: glowTexture,
-  color: STATES.idle.glowColor,
-  transparent: true,
-  opacity: 0.03,
-  blending: THREE.AdditiveBlending,
-  depthWrite: false
-}));
-glowSprite.scale.setScalar(1.5);
-scene.add(glowSprite);
-
-/* ════════════════════════════════════════════════════════════════════
-   ANILLOS DE RESONANCIA (para estado HABLANDO)
-   ════════════════════════════════════════════════════════════════════ */
-const RING_COUNT = 5;
-const rings = [];
-for (let i = 0; i < RING_COUNT; i++) {
-  const ringGeo = new THREE.RingGeometry(1.1, 1.15, 64);
-  const ringMat = new THREE.MeshBasicMaterial({
-    color: 0x00aaff,
-    transparent: true,
-    opacity: 0,
-    side: THREE.DoubleSide,
-    blending: THREE.AdditiveBlending,
-    depthWrite: false
-  });
-  const ring = new THREE.Mesh(ringGeo, ringMat);
-  ring.rotation.x = -Math.PI / 2;
-  ring.scale.setScalar(0.1);
-  ring.userData = { delay: i * 0.15, active: false };
-  scene.add(ring);
-  rings.push(ring);
+function setState(name, btn){
+  tgt = {...STATES[name]};
+  document.getElementById('estado').textContent = tgt.label;
+  document.querySelectorAll('button').forEach(b=>b.classList.remove('on'));
+  if(btn) btn.classList.add('on');
 }
 
-let ringTimer = 0;
+function animate(){
+  requestAnimationFrame(animate);
+  t += 0.016;
+  const f = 0.04;
+  cur.r = lerp(cur.r,tgt.r,f);
+  cur.g = lerp(cur.g,tgt.g,f);
+  cur.b = lerp(cur.b,tgt.b,f);
+  cur.amp = lerp(cur.amp,tgt.amp,f);
+  cur.speed = lerp(cur.speed,tgt.speed,f);
+  cur.pulse = lerp(cur.pulse,tgt.pulse,f);
 
-/* ════════════════════════════════════════════════════════════════════
-   WEBSOCKET
-   ════════════════════════════════════════════════════════════════════ */
-let ws = null;
-const WS_URL = 'ws://localhost:8765';
-let reconnectAttempts = 0;
-const MAX_RECONNECT = 10;
+  const col = new THREE.Color(cur.r,cur.g,cur.b);
+  mat.color.copy(col);
+  glowMat.color.copy(col);
+  coreMat.color.copy(col);
 
-function connectWS() {
-  ws = new WebSocket(WS_URL);
-  ws.binaryType = 'arraybuffer';
-
-  ws.onopen = () => {
-    console.log('WS conectado');
-    reconnectAttempts = 0;
-    updateConnectionStatus('Conectado', '#00ff88');
-  };
-
-  ws.onmessage = (event) => {
-    try {
-      const msg = JSON.parse(event.data);
-      if (msg.event === 'STATE_CHANGED') {
-        const newState = msg.payload.to;
-        if (STATES[newState]) {
-          targetState = newState;
-        }
-      } else if (msg.event === 'SPEAKING_STARTED') {
-        targetState = 'hablando';
-        triggerRings();
-      } else if (msg.event === 'SPEAKING_ENDED') {
-        targetState = 'idle';
-      }
-    } catch (e) { console.warn('WS parse error', e); }
-  };
-
-  ws.onclose = () => {
-    updateConnectionStatus('Desconectado - Reintentando...', '#ff4444');
-    if (reconnectAttempts < MAX_RECONNECT) {
-      reconnectAttempts++;
-      setTimeout(connectWS, 1000 * Math.min(reconnectAttempts, 5));
-    }
-  };
-
-  ws.onerror = (e) => {
-    console.error('WS error', e);
-    updateConnectionStatus('Error de conexión', '#ff4444');
-  };
-}
-
-function updateConnectionStatus(text, color) {
-  const el = document.getElementById('connection');
-  el.textContent = text;
-  el.style.color = color;
-}
-
-function triggerRings() {
-  ringTimer = 0;
-  rings.forEach((r, i) => {
-    r.userData.active = true;
-    r.userData.startTime = Date.now() + i * 150;
-    r.material.opacity = 0.25;
-    r.scale.setScalar(1.0);
-  });
-}
-
-/* ════════════════════════════════════════════════════════════════════
-   INTERPOLACIÓN DE ESTADOS (LERP)
-   ════════════════════════════════════════════════════════════════════ */
-function lerpState() {
-  const current = STATES[currentState];
-  const target = STATES[targetState];
-
-  if (currentState !== targetState) {
-    stateTransition = Math.min(1, stateTransition + TRANSITION_SPEED);
-    if (stateTransition >= 1) {
-      currentState = targetState;
-      stateTransition = 0;
-      document.getElementById('status').textContent = STATES[currentState].name;
-      document.getElementById('status').style.color = '#' + target.baseColor.getHexString();
-    }
-  } else {
-    stateTransition = Math.max(0, stateTransition - TRANSITION_SPEED);
+  for(let i=0;i<N;i++){
+    const pha = ph[i];
+    const wave = Math.sin(t*cur.speed*2 + phi_arr[i]*3 + pha)*cur.amp
+               + Math.sin(t*cur.speed*0.7 + theta_arr[i]*2 + pha)*cur.amp*0.5;
+    const r = 1.0 + wave;
+    pos[i*3]   = base[i*3]*r;
+    pos[i*3+1] = base[i*3+1]*r;
+    pos[i*3+2] = base[i*3+2]*r;
   }
+  geo.attributes.position.needsUpdate = true;
 
-  const t = stateTransition;
-  const invT = 1 - t;
+  const ps = 1 + Math.sin(t*cur.speed*2)*cur.pulse;
+  pts.scale.setScalar(ps);
+  glow.scale.setScalar(ps*1.05);
+  core.scale.setScalar(1 + Math.sin(t*cur.speed*3)*cur.pulse*0.5);
+  mat.opacity = 0.7 + Math.sin(t*cur.speed)*0.15;
 
-  // Interpolar uniforms de esfera
-  sphereUniforms.uNoiseSpeed.value = current.noiseSpeed * invT + target.noiseSpeed * t;
-  sphereUniforms.uNoiseAmplitude.value = current.noiseAmplitude * invT + target.noiseAmplitude * t;
-  sphereUniforms.uBreathSpeed.value = current.breathSpeed * invT + target.breathSpeed * t;
-  sphereUniforms.uBreathAmount.value = current.breathAmount * invT + target.breathAmount * t;
-  sphereUniforms.uWaveFrequency.value = current.waveFrequency * invT + target.waveFrequency * t;
-  sphereUniforms.uWaveAmplitude.value = current.waveAmplitude * invT + target.waveAmplitude * t;
-
-  sphereUniforms.uBaseColor.value.lerpColors(current.baseColor, target.baseColor, t);
-  sphereUniforms.uGlowColor.value.lerpColors(current.glowColor, target.glowColor, t);
-
-  // Partículas
-  particleUniforms.uParticleColor.value.lerpColors(current.particleColor, target.particleColor, t);
-  particleUniforms.uParticleSpeed.value = current.particleSpeed * invT + target.particleSpeed * t;
-
-  // Glow sprite - opacidad reducida
-  glowSprite.material.color.lerpColors(current.glowColor, target.glowColor, t);
-  glowSprite.material.opacity = 0.02 * invT + 0.04 * t;
-  glowSprite.scale.setScalar(1.4 * invT + 1.6 * t);
-}
-
-/* ════════════════════════════════════════════════════════════════════
-   LOOP PRINCIPAL - Garantizado requestAnimationFrame continuo
-   ════════════════════════════════════════════════════════════════════ */
-let time = 0;
-let animationId = null;
-
-function animate() {
-  animationId = requestAnimationFrame(animate);
-  time += 0.01;
-
-  // Actualizar uniforms de tiempo
-  sphereUniforms.uTime.value = time;
-  particleUniforms.uTime.value = time;
-
-  // Lerp de estados
-  lerpState();
-
-  // Rotación suave de la esfera
-  sphere.rotation.y += 0.0003;
-  sphere.rotation.x = Math.sin(time * 0.1) * 0.03;
-
-  // Animar partículas (rotación orbital)
-  particles.rotation.y += 0.00015 * particleUniforms.uParticleSpeed.value;
-  particles.rotation.x += 0.00008 * particleUniforms.uParticleSpeed.value;
-
-  // Anillos de resonancia
-  if (currentState === 'hablando' || rings.some(r => r.userData.active)) {
-    ringTimer += 0.016;
-    rings.forEach((ring, i) => {
-      if (!ring.userData.active) return;
-      const elapsed = (Date.now() - ring.userData.startTime) / 1000;
-      if (elapsed < 0) return;
-      const scale = 1.0 + elapsed * 0.6;
-      const opacity = Math.max(0, 0.25 * (1 - elapsed / 2.0));
-      ring.scale.setScalar(scale);
-      ring.material.opacity = opacity;
-      if (opacity <= 0) ring.userData.active = false;
-    });
-  }
-
-  // Respiración sutil en el glow
-  const breathScale = 1 + Math.sin(time * STATES[currentState].breathSpeed) * 0.01;
-  glowSprite.scale.setScalar(glowSprite.scale.x * 0.99 + 1.5 * breathScale * 0.01);
+  ry += 0.004*cur.speed;
+  pts.rotation.y = ry;
+  pts.rotation.x = Math.sin(t*0.15)*0.08;
+  glow.rotation.y = ry*0.5;
 
   renderer.render(scene, camera);
 }
-
-/* ════════════════════════════════════════════════════════════════════
-   INICIO
-   ════════════════════════════════════════════════════════════════════ */
-connectWS();
 animate();
 
-// Evitar que la pestaña en background congele la animación
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    cancelAnimationFrame(animationId);
-  } else {
-    animate();
-  }
-});
-
+function connectWS(){
+  try {
+    const ws = new WebSocket('ws://localhost:8765');
+    const el = document.getElementById('ws-status');
+    ws.onopen = ()=>{ el.textContent='CONECTADO'; el.className='ok'; };
+    ws.onclose = ()=>{ el.textContent='DESCONECTADO'; el.className=''; setTimeout(connectWS,3000); };
+    ws.onmessage = e=>{
+      try{
+        const d = JSON.parse(e.data);
+        // Manejar ambos formatos: {event, payload:{to}} o {estado}
+        const s = d.estado || (d.payload && d.payload.to);
+        if(s && STATES[s]) setState(s);
+      }catch(err){}
+    };
+  }catch(err){ setTimeout(connectWS,3000); }
+}
+connectWS();
   </script>
 </body>
 </html>
